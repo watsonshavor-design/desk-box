@@ -4,6 +4,14 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
 <title>Desk — live room</title>
+<meta name="theme-color" content="#0d1117">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Desk">
+<link rel="manifest" href="/static/manifest.webmanifest">
+<link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="192x192" href="/static/icon-192.png">
 <style>
   :root { --bg:#0d1117; --panel:#161b22; --line:#2a3139; --txt:#e6edf3;
           --dim:#8b949e; --grok:#a371f7; --gemini:#58a6ff; --me:#238636; }
@@ -63,7 +71,13 @@
 </div>
 <script>
 const qs = new URLSearchParams(location.search);
-const token = qs.get("token") || "";
+let token = qs.get("token") || localStorage.getItem("desk_token") || "";
+if (qs.get("token")) localStorage.setItem("desk_token", qs.get("token"));
+if (!token) {
+  token = prompt("Desk room token") || "";
+  if (token) localStorage.setItem("desk_token", token);
+  if (token && !qs.get("token")) history.replaceState(null,"", "/?token="+encodeURIComponent(token));
+}
 const log = document.getElementById("log");
 const input = document.getElementById("input");
 const sendBtn = document.getElementById("send");
@@ -132,6 +146,11 @@ fetch("/api/desk?token="+encodeURIComponent(token)).then(r=>r.json()).then(d=>{
 
 sendBtn.disabled = true;
 connect();
+</script>
+<script>
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('/static/sw.js').catch(()=>{});
+}
 </script>
 </body>
 </html>
