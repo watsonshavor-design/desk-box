@@ -224,6 +224,21 @@ async def ace_reply(request: Request):
     return JSONResponse({"ok": True})
 
 
+@app.get("/api/recent")
+async def recent(token: str = "", limit: int = 20):
+    """Last N room messages (all senders) — lets the Ace bridge worker see
+    thread context before replying to an @ace mention."""
+    if token != DESK_TOKEN:
+        return JSONResponse({"error": "bad token"}, status_code=403)
+    try:
+        limit = max(1, min(int(limit or 20), 50))
+    except (TypeError, ValueError):
+        limit = 20
+    async with history_lock:
+        msgs = list(history[-limit:])
+    return JSONResponse({"messages": msgs})
+
+
 @app.websocket("/ws")
 async def ws_endpoint(ws: WebSocket):
     token = ws.query_params.get("token", "")
