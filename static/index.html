@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>Desk — live room</title>
+<style>
+  :root { --bg:#0d1117; --panel:#161b22; --line:#2a3139; --txt:#e6edf3;
+          --dim:#8b949e; --grok:#a371f7; --gemini:#58a6ff; --me:#238636; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--txt);
+         font-family:-apple-system,system-ui,"Segoe UI",Roboto,sans-serif;
+         display:flex; flex-direction:column; height:100dvh; }
+  header { padding:10px 14px; border-bottom:1px solid var(--line);
+           display:flex; align-items:center; gap:10px; background:var(--panel); }
+  header h1 { font-size:16px; margin:0; font-weight:600; }
+  header .spade { color:var(--grok); }
+  #status { margin-left:auto; font-size:12px; color:var(--dim); }
+  #status.on { color:#3fb950; }
+  #desk { font-size:12px; color:var(--dim); background:var(--panel);
+          border-bottom:1px solid var(--line); padding:8px 14px; line-height:1.5; }
+  #desk b { color:var(--txt); }
+  #log { flex:1; overflow-y:auto; padding:14px; display:flex;
+         flex-direction:column; gap:10px; }
+  .msg { max-width:92%; padding:10px 12px; border-radius:12px; line-height:1.5;
+         font-size:14px; white-space:pre-wrap; word-wrap:break-word; }
+  .msg.me { align-self:flex-end; background:#12351f; border:1px solid #1f5c33; }
+  .msg.grok { align-self:flex-start; background:var(--panel);
+              border:1px solid var(--line); border-left:3px solid var(--grok); }
+  .msg.gemini { align-self:flex-start; background:var(--panel);
+              border:1px solid var(--line); border-left:3px solid var(--gemini); }
+  .who { font-size:11px; font-weight:700; letter-spacing:.06em; margin-bottom:4px; }
+  .who.grok { color:var(--grok); } .who.gemini { color:var(--gemini); }
+  .who.me { color:#3fb950; }
+  .round { font-size:10px; color:var(--dim); margin-left:6px; font-weight:400; }
+  .thinking { font-size:12px; color:var(--dim); font-style:italic; }
+  #bar { display:flex; gap:8px; padding:10px 12px; border-top:1px solid var(--line);
+         background:var(--panel); align-items:center; }
+  #input { flex:1; background:var(--bg); border:1px solid var(--line); color:var(--txt);
+           border-radius:10px; padding:10px 12px; font-size:15px; outline:none; }
+  #input:focus { border-color:var(--grok); }
+  #send { background:var(--grok); border:0; color:#fff; font-weight:700;
+          border-radius:10px; padding:10px 16px; font-size:15px; cursor:pointer; }
+  #send:disabled { opacity:.4; }
+  .toggle { display:flex; align-items:center; gap:6px; font-size:12px; color:var(--dim);
+            white-space:nowrap; }
+  @media (max-width:640px){ #desk{font-size:11px} .toggle span{display:none} }
+</style>
+</head>
+<body>
+<header>
+  <span class="spade">♠️</span><h1>Desk — live room</h1>
+  <span id="status">connecting…</span>
+</header>
+<div id="desk">loading desk context…</div>
+<div id="log"></div>
+<div id="bar">
+  <label class="toggle" title="Each model reacts to the other's take before the round closes">
+    <input type="checkbox" id="xtalk"> <span>cross-talk</span>
+  </label>
+  <input id="input" placeholder="Message Grok + Gemini…" autocomplete="off">
+  <button id="send">Send</button>
+</div>
+<script>
+const qs = new URLSearchParams(location.search);
+const token = qs.get("token") || "";
+const log = document.getElementById("log");
+const input = document.getElementById("input");
+const sendBtn = document.getElementById("send");
+const statusEl = document.getElementById("status");
+const xtalk = document.getElementById("xtalk");
+let ws = null, pending = {};
+
+function esc(s){ const d=document.createElement("div"); d.textContent=s; return d.innerHTML; }
+
+function addMsg(who, text, round){
+  const div = document.createElement("div");
+  div.className = "msg " + who;
+  const label = who==="me" ? "SHAVOR" : who.toUpperCase();
+  div.innerHTML = `<div class="who ${who}">${label}` +
+    (round && round>1 ? `<span class="round">round ${round} · reacts</span>` : "") +
+    `</div><div>${esc(text)}</div>`;
+  log.appendChild(div); log.scrollTop = log.scrollHeight;
+  return div;
+}
+
+function setThinking(provider, state){
+  const id = "th-" + provider;
+  let el = document.getElementById(id);
+  if(state==="thinking" || state==="reacting"){
+    if(!el){ el = document.createElement("div"); el.id=id; el.className="thinking"; log.appendChild(el); }
+    el.textContent = (provider==="grok"?"Grok":"Gemini") +
+      (state==="reacting" ? " is reacting…" : " is thinking…");
+    log.scrollTop = log.scrollHeight;
+  } else if(el){ el.remove(); }
+}
+
+function connect(){
+  const proto = location.protocol === "https:" ? "wss" : "ws";
+  ws = new WebSocket(`${proto}://${location.host}/ws?token=${encodeURIComponent(token)}`);
+  ws.onopen = () => { statusEl.textContent = "live"; statusEl.classList.add("on"); sendBtn.disabled=false; };
+  ws.onclose = () => { statusEl.textContent = "reconnecting…"; statusEl.classList.remove("on");
+                       sendBtn.disabled=true; setTimeout(connect, 2500); };
+  ws.onmessage = (ev) => {
+    const m = JSON.parse(ev.data);
+    if(m.type==="history"){ log.innerHTML=""; (m.messages||[]).forEach(x=>{
+        if(x.from==="shavor") addMsg("me", x.text);
+        else addMsg(x.from, x.text, x.round); }); }
+    else if(m.type==="user"){ addMsg("me", m.text); }
+    else if(m.type==="status"){ setThinking(m.provider, m.state);
+        if(m.state==="error") addMsg(m.provider, "⚠ " + (m.detail||"request failed")); }
+    else if(m.type==="reply"){ setThinking(m.provider, "done"); addMsg(m.provider, m.text, m.round); }
+    else if(m.type==="done"){ /* round closed */ }
+  };
+}
+
+function send(){
+  const text = input.value.trim();
+  if(!text || !ws || ws.readyState!==1) return;
+  ws.send(JSON.stringify({type:"user", text, crosstalk: xtalk.checked}));
+  input.value = "";
+}
+
+sendBtn.onclick = send;
+input.addEventListener("keydown", e=>{ if(e.key==="Enter") send(); });
+
+fetch("/api/desk?token="+encodeURIComponent(token)).then(r=>r.json()).then(d=>{
+  document.getElementById("desk").innerHTML =
+    `<b>Goal:</b> ${esc(d.goal||"")} &nbsp;·&nbsp; <b>GLND lock:</b> ${esc(d.glnd_lock||"")}<br>`+
+    `<b>Risk:</b> ${esc(d.risk||"")}<br><span>${esc(d.notes||"")}</span>`;
+}).catch(()=>{ document.getElementById("desk").textContent="desk context unavailable"; });
+
+sendBtn.disabled = true;
+connect();
+</script>
+</body>
+</html>
