@@ -23,7 +23,7 @@ import os
 import secrets
 from datetime import datetime, timezone
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -182,6 +182,46 @@ async def desk(token: str = ""):
     if token != DESK_TOKEN:
         return JSONResponse({"error": "bad token"}, status_code=403)
     return JSONResponse(DESK_CONTEXT)
+
+
+# --- Ace bridge -----------------------------------------------------------
+# There is no API for Muse, so Ace joins the room through these two
+# endpoints instead:
+#   GET  /api/ace-inbox?token=...&since=<iso-ts> -> {"messages": [...]}
+#       Returns Shavor's messages mentioning @ace newer than `since`.
+#   POST /api/ace-reply  {"token": ..., "text": ...} -> {"ok": true}
+#       Injects Ace's reply into the room (broadcast + session log).
+# A scheduled check on Ace's side polls the inbox every couple of minutes
+# and posts replies. Any app implementing these two endpoints gets Ace.
+@app.get("/api/ace-inbox")
+async def ace_inbox(token: str = "", since: str = ""):
+    if token != DESK_TOKEN:
+        return JSONResponse({"error": "bad token"}, status_code=403)
+    since = since.replace(" ", "+")  # tolerate unencoded '+' in iso timestamps
+    async with history_lock:
+        msgs = [m for m in history
+                if m.get("from") == "shavor"
+                and "@ace" in m.get("text", "").lower()
+                and m.get("ts", "") > since]
+    return JSONResponse({"messages": msgs})
+
+
+@app.post("/api/ace-reply")
+async def ace_reply(request: Request):
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "bad body"}, status_code=400)
+    if body.get("token") != DESK_TOKEN:
+        return JSONResponse({"error": "bad token"}, status_code=403)
+    text = str(body.get("text", "")).strip()[:4000]
+    if not text:
+        return JSONResponse({"error": "empty"}, status_code=400)
+    entry = {"from": "ace", "text": text, "ts": now_iso()}
+    await remember(entry)
+    await room.broadcast({"type": "reply", "provider": "ace",
+                          "round": 1, "text": text})
+    return JSONResponse({"ok": True})
 
 
 @app.websocket("/ws")
