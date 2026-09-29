@@ -1,0 +1,8 @@
+{
+  "name": "desk-box",
+  "backend": "1.4.0",
+  "frontend": "1.4.0",
+  "protocol": "1",
+  "android": null,
+  "description": "Baseline before the command-center redesign. Room v4: funnel mode, shared memory, 14-day retention, photo and video uploads."
+}
