@@ -45,6 +45,7 @@
   .who.grok { color:var(--grok); } .who.gemini { color:var(--gemini); }
   .who.me { color:#3fb950; } .who.ace { color:#3fb950; }
   .round { font-size:10px; color:var(--dim); margin-left:6px; font-weight:400; }
+  .ts { font-size:10px; color:var(--dim); margin-left:6px; font-weight:400; }
   .thinking { font-size:12px; color:var(--dim); font-style:italic; }
   #bar { display:flex; gap:8px; padding:10px 12px; border-top:1px solid var(--line);
          background:var(--panel); align-items:center; }
@@ -124,16 +125,26 @@ const NAMES = {
   me:     ["SHAVOR", null]
 };
 
-function addMsg(who, text, round){
+function addMsg(who, text, round, ts){
   const div = document.createElement("div");
   div.className = "msg " + who;
   const nm = NAMES[who] || [who.toUpperCase(), null];
   const av = nm[1] ? `<img class="av" src="${nm[1]}" alt="">` : "";
   div.innerHTML = `<div class="who ${who}">${av}${nm[0]}` +
     (round && round>1 ? `<span class="round">round ${round} · reacts</span>` : "") +
+    `<span class="ts">${esc(fmtTs(ts))}</span>` +
     `</div><div>${esc(text)}</div>`;
   log.appendChild(div); log.scrollTop = log.scrollHeight;
   return div;
+}
+
+// Every message shows who said it and when — name + date + time, always.
+function fmtTs(ts){
+  try {
+    const d = ts ? new Date(ts) : new Date();
+    return d.toLocaleString(undefined,
+      {month:"numeric", day:"numeric", hour:"numeric", minute:"2-digit"});
+  } catch(e){ return ""; }
 }
 
 function setThinking(provider, state){
@@ -156,12 +167,12 @@ function connect(){
   ws.onmessage = (ev) => {
     const m = JSON.parse(ev.data);
     if(m.type==="history"){ log.innerHTML=""; (m.messages||[]).forEach(x=>{
-        if(x.from==="shavor") addMsg("me", x.text);
-        else addMsg(x.from, x.text, x.round); }); }
-    else if(m.type==="user"){ addMsg("me", m.text); }
+        if(x.from==="shavor") addMsg("me", x.text, null, x.ts);
+        else addMsg(x.from, x.text, x.round, x.ts); }); }
+    else if(m.type==="user"){ addMsg("me", m.text, null, m.ts); }
     else if(m.type==="status"){ setThinking(m.provider, m.state);
-        if(m.state==="error") addMsg(m.provider, "⚠ " + (m.detail||"request failed")); }
-    else if(m.type==="reply"){ setThinking(m.provider, "done"); addMsg(m.provider, m.text, m.round); }
+        if(m.state==="error") addMsg(m.provider, "⚠ " + (m.detail||"request failed"), null, null); }
+    else if(m.type==="reply"){ setThinking(m.provider, "done"); addMsg(m.provider, m.text, m.round, m.ts); }
     else if(m.type==="done"){ /* round closed */ }
   };
 }
