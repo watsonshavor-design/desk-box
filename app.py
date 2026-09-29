@@ -99,6 +99,30 @@ def prune_uploads():
     except OSError:
         pass
 
+
+def resolve_attachment(att):
+    """Validate a client-supplied attachment dict.
+    Returns (attachment, image, kind) — image is a (mime, base64) tuple
+    for provider vision, or None."""
+    attachment, image, kind = None, None, None
+    if isinstance(att, dict) and att.get("url"):
+        safe = os.path.basename(att["url"])
+        if UPLOAD_RE.match(safe):
+            ext = safe.rsplit(".", 1)[-1].lower()
+            kind = "image" if ext in IMAGE_EXTS else "video"
+            attachment = {"url": f"/uploads/{safe}", "kind": kind,
+                          "name": str(att.get("name") or safe)[:120]}
+            if kind == "image":
+                try:
+                    with open(os.path.join(UPLOAD_DIR, safe), "rb") as f:
+                        raw = f.read()
+                    if raw and len(raw) <= MAX_IMAGE_BYTES:
+                        image = (IMAGE_MIMES[ext],
+                                 base64.b64encode(raw).decode())
+                except OSError:
+                    pass
+    return attachment, image, kind
+
 DESK_TOKEN = os.environ.get("DESK_TOKEN") or secrets.token_urlsafe(24)
 
 # Static desk context shown in the room's side panel (update as the desk evolves).
@@ -411,9 +435,15 @@ async def ace_reply(request: Request):
     if not text:
         return JSONResponse({"error": "empty"}, status_code=400)
     entry = {"from": "ace", "text": text, "ts": now_iso()}
+    attachment, image, kind = resolve_attachment(body.get("attachment"))
+    if attachment:
+        entry["attachment"] = attachment
     await remember(entry)
-    await room.broadcast({"type": "reply", "provider": "ace",
-                          "round": 1, "text": text, "ts": entry["ts"]})
+    bcast = {"type": "reply", "provider": "ace",
+             "round": 1, "text": text, "ts": entry["ts"]}
+    if attachment:
+        bcast["attachment"] = attachment
+    await room.broadcast(bcast)
     # Two-way discussion: when the caller sets discuss=true, Ace's post is
     # also queued for the Grok/Gemini fan-out so Rail and Anchor respond.
     # Framed so the providers know the speaker is Ace, not Shavor.
@@ -422,7 +452,9 @@ async def ace_reply(request: Request):
     if body.get("discuss") is True:
         framed = ("[From Ace, your fellow desk partner — respond to him as a "
                   "peer, not as Shavor. Direct and plain.]\n\n" + text)
-        await msg_queue.put((framed, False, None))
+        if kind == "video":
+            framed += "\n\n[Ace shared a video.]"
+        await msg_queue.put((framed, False, image))
     return JSONResponse({"ok": True})
 
 
