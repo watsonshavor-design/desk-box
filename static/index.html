@@ -88,6 +88,8 @@
     <input type="checkbox" id="xtalk"> <span>cross-talk</span>
   </label>
   <input id="input" placeholder="What's on your mind, Shavor?…" autocomplete="off">
+  <button id="attachBtn" class="iconbtn" title="Send a photo or video">📎</button>
+  <input type="file" id="fileInput" accept="image/*,video/*" style="display:none">
   <button id="send">Send</button>
 </div>
 <script>
@@ -134,7 +136,15 @@ const NAMES = {
   me:     ["SHAVOR", null]
 };
 
-function addMsg(who, text, round, ts){
+function attHtml(a){
+  if(!a || !a.url) return "";
+  const src = esc(a.url) + "?token=" + encodeURIComponent(token);
+  if(a.kind === "video")
+    return `<video src="${src}" controls playsinline style="max-width:100%;border-radius:8px;margin-top:6px"></video>`;
+  return `<a href="${src}" target="_blank" rel="noopener"><img src="${src}" alt="photo" style="max-width:100%;border-radius:8px;margin-top:6px"></a>`;
+}
+
+function addMsg(who, text, round, ts, att){
   const div = document.createElement("div");
   div.className = "msg " + who;
   const nm = NAMES[who] || [who.toUpperCase(), null];
@@ -142,7 +152,7 @@ function addMsg(who, text, round, ts){
   div.innerHTML = `<div class="who ${who}">${av}${nm[0]}` +
     (round && round>1 ? `<span class="round">round ${round} · reacts</span>` : "") +
     `<span class="ts">${esc(fmtTs(ts))}</span>` +
-    `</div><div>${esc(text)}</div>`;
+    `</div><div>${esc(text)}${attHtml(att)}</div>`;
   log.appendChild(div); log.scrollTop = log.scrollHeight;
   return div;
 }
@@ -247,9 +257,9 @@ function connect(){
   ws.onmessage = (ev) => {
     const m = JSON.parse(ev.data);
     if(m.type==="history"){ log.innerHTML=""; (m.messages||[]).forEach(x=>{
-        if(x.from==="shavor") addMsg("me", x.text, null, x.ts);
+        if(x.from==="shavor") addMsg("me", x.text, null, x.ts, x.attachment);
         else addMsg(x.from, x.text, x.round, x.ts); }); }
-    else if(m.type==="user"){ addMsg("me", m.text, null, m.ts); }
+    else if(m.type==="user"){ addMsg("me", m.text, null, m.ts, m.attachment); }
     else if(m.type==="status"){ setThinking(m.provider, m.state);
         if(m.state==="error") addMsg(m.provider, "⚠ " + (m.detail||"request failed"), null, null); }
     else if(m.type==="reply"){ setThinking(m.provider, "done"); addMsg(m.provider, m.text, m.round, m.ts); speak(m.provider, m.text); }
@@ -266,6 +276,37 @@ function send(){
 
 sendBtn.onclick = send;
 input.addEventListener("keydown", e=>{ if(e.key==="Enter") send(); });
+
+// --- Photo/video: pick a file, upload it, then send it as a chat message ---
+const attachBtn = document.getElementById("attachBtn");
+const fileInput = document.getElementById("fileInput");
+attachBtn.onclick = () => fileInput.click();
+fileInput.onchange = async () => {
+  const f = fileInput.files[0];
+  fileInput.value = "";
+  if(!f) return;
+  if(!ws || ws.readyState!==1){
+    addMsg("me", "⚠ not connected — try again in a moment", null, null);
+    return;
+  }
+  attachBtn.textContent = "⏳";
+  try {
+    const fd = new FormData();
+    fd.append("file", f);
+    const r = await fetch("/api/upload?token="+encodeURIComponent(token),
+                          {method:"POST", body: fd});
+    const d = await r.json();
+    if(!d.ok) throw new Error(d.error || ("upload failed ("+r.status+")"));
+    const caption = input.value.trim();
+    ws.send(JSON.stringify({type:"user", text: caption,
+                            crosstalk: xtalk.checked,
+                            attachment:{url:d.url, kind:d.kind, name:d.name}}));
+    input.value = "";
+  } catch(e) {
+    addMsg("me", "⚠ couldn't send that file: "+e.message, null, null);
+  }
+  attachBtn.textContent = "📎";
+};
 
 function greeting(){
   const hr = new Date().getHours();
