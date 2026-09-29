@@ -189,8 +189,13 @@ async def desk(token: str = ""):
 # endpoints instead:
 #   GET  /api/ace-inbox?token=...&since=<iso-ts> -> {"messages": [...]}
 #       Returns Shavor's messages mentioning @ace newer than `since`.
-#   POST /api/ace-reply  {"token": ..., "text": ...} -> {"ok": true}
+#   POST /api/ace-reply  {"token": ..., "text": ..., "discuss"?: bool}
+#       -> {"ok": true}
 #       Injects Ace's reply into the room (broadcast + session log).
+#       When discuss=true, Ace's post is ALSO queued for the Grok/Gemini
+#       fan-out (framed as Ace speaking, single round) so Rail and Anchor
+#       can respond to it. Bot replies never re-enter the queue, so a
+#       discuss post yields at most one bot round and can never loop.
 # A scheduled check on Ace's side polls the inbox every couple of minutes
 # and posts replies. Any app implementing these two endpoints gets Ace.
 @app.get("/api/ace-inbox")
@@ -221,6 +226,15 @@ async def ace_reply(request: Request):
     await remember(entry)
     await room.broadcast({"type": "reply", "provider": "ace",
                           "round": 1, "text": text})
+    # Two-way discussion: when the caller sets discuss=true, Ace's post is
+    # also queued for the Grok/Gemini fan-out so Rail and Anchor respond.
+    # Framed so the providers know the speaker is Ace, not Shavor.
+    # Loop safety: bot replies are broadcast + logged only — they never go
+    # back on msg_queue — so one discuss post yields at most one bot round.
+    if body.get("discuss") is True:
+        framed = ("[From Ace, your fellow desk partner — respond to him as a "
+                  "peer, not as Shavor. Direct and plain.]\n\n" + text)
+        await msg_queue.put((framed, False))
     return JSONResponse({"ok": True})
 
 
