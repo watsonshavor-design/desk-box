@@ -78,6 +78,28 @@ async def remember(entry):
     append_log(entry)
 
 
+def load_history():
+    """Restore room history from the on-disk log so a redeploy/restart
+    doesn't wipe the room. Returns at most HISTORY_KEEP entries."""
+    entries = []
+    try:
+        with open(LOG_PATH) as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    e = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if (isinstance(e, dict) and e.get("from")
+                        and e.get("text") and e.get("ts")):
+                    entries.append(e)
+    except OSError:
+        pass
+    return entries[-HISTORY_KEEP:]
+
+
 class Room:
     """Tracks connected browsers; broadcasts to all of them."""
 
@@ -165,6 +187,10 @@ async def worker():
 @app.on_event("startup")
 async def on_startup():
     asyncio.create_task(worker())
+    # Restore room history from disk — otherwise every redeploy wipes it.
+    async with history_lock:
+        history.extend(load_history())
+        del history[:max(0, len(history) - HISTORY_KEEP)]
     if "DESK_TOKEN" not in os.environ:
         log.info("DESK_TOKEN not set — generated per-boot token.")
     log.info("Desk Box up. Open /?token=%s", DESK_TOKEN)
