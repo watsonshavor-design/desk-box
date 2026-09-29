@@ -238,33 +238,69 @@ class Room:
 room = Room()
 
 
-async def fan_out(text, crosstalk, image=None):
+# Framing added when a provider's take is collected for Ace's synthesis
+# (funnel mode) rather than shown to Shavor directly.
+FUNNEL_HEADER = (
+    "[Your reply goes to Ace — not to Shavor. Ace will synthesize your take "
+    "with the other partner's into ONE final answer for Shavor. Be direct, "
+    "structured, and complete: lead with your conclusion, then your reasons. "
+    "He reads Ace's synthesis, never this text, so make it count.]\n\n")
+
+
+async def fan_out(job):
     """Ask Grok and Gemini in parallel; optionally run one cross-talk round.
+
+    job is a dict: {text, crosstalk, image, funnel, for_ts}.
     image is an optional (mime_type, base64) tuple — both partners can see
-    photos, so a chart screenshot gets two expert reads, not just pixels."""
+    photos, so a chart screenshot gets two expert reads, not just pixels.
+    In funnel mode the takes are saved hidden (never broadcast) for Ace to
+    synthesize into one answer; a failing provider leaves a hidden
+    error placeholder so the synthesis never waits forever."""
+    text, crosstalk = job["text"], job["crosstalk"]
+    image = job.get("image")
+    funnel = job.get("funnel", False)
+    for_ts = job.get("for_ts")
     first = {}
 
     async def one(name):
         try:
             await room.broadcast({"type": "status", "provider": name,
                                   "state": "thinking"})
-            reply = await PROVIDERS[name](text, image=image)
+            prompt = (FUNNEL_HEADER + text) if funnel else text
+            reply = await PROVIDERS[name](prompt, image=image)
             first[name] = reply
             entry = {"from": name, "round": 1, "text": reply,
                      "ts": now_iso()}
-            await room.broadcast({"type": "reply", "provider": name,
-                                  "round": 1, "text": reply,
-                                  "ts": entry["ts"]})
-            await remember(entry)
+            if funnel:
+                entry["hidden"] = True
+                entry["funnel"] = True
+                entry["for_ts"] = for_ts
+                await remember(entry)
+                await room.broadcast({"type": "status", "provider": name,
+                                      "state": "done"})
+            else:
+                await room.broadcast({"type": "reply", "provider": name,
+                                      "round": 1, "text": reply,
+                                      "ts": entry["ts"]})
+                await remember(entry)
         except Exception as e:  # one provider failing never blocks the other
             err = f"{name} failed: {e}"
             log.warning(err)
-            await room.broadcast({"type": "status", "provider": name,
-                                  "state": "error", "detail": str(e)})
+            if funnel:
+                entry = {"from": name, "round": 1, "text":
+                         f"[{name} couldn't be reached — no take.]",
+                         "ts": now_iso(), "hidden": True, "funnel": True,
+                         "for_ts": for_ts, "error": True}
+                await remember(entry)
+                await room.broadcast({"type": "status", "provider": name,
+                                      "state": "done"})
+            else:
+                await room.broadcast({"type": "status", "provider": name,
+                                      "state": "error", "detail": str(e)})
 
     await asyncio.gather(*(one(n) for n in PROVIDERS))
 
-    if crosstalk and "grok" in first and "gemini" in first:
+    if crosstalk and not funnel and "grok" in first and "gemini" in first:
         async def react(name, other):
             try:
                 await room.broadcast({"type": "status", "provider": name,
@@ -289,9 +325,9 @@ async def fan_out(text, crosstalk, image=None):
 
 async def worker():
     while True:
-        text, crosstalk, image = await msg_queue.get()
+        job = await msg_queue.get()
         try:
-            await fan_out(text, crosstalk, image)
+            await fan_out(job)
         finally:
             msg_queue.task_done()
 
@@ -438,6 +474,11 @@ async def ace_reply(request: Request):
     attachment, image, kind = resolve_attachment(body.get("attachment"))
     if attachment:
         entry["attachment"] = attachment
+    if body.get("funnel_answer") is True:
+        # Marks this as the single synthesized answer to a funnel question
+        # so the bridge never synthesizes the same question twice.
+        entry["funnel_answer"] = True
+        entry["for_ts"] = str(body.get("for_ts") or "")
     await remember(entry)
     bcast = {"type": "reply", "provider": "ace",
              "round": 1, "text": text, "ts": entry["ts"]}
@@ -454,7 +495,9 @@ async def ace_reply(request: Request):
                   "peer, not as Shavor. Direct and plain.]\n\n" + text)
         if kind == "video":
             framed += "\n\n[Ace shared a video.]"
-        await msg_queue.put((framed, False, image))
+        await msg_queue.put({"text": framed, "crosstalk": False,
+                             "image": image, "funnel": False,
+                             "for_ts": entry["ts"]})
     return JSONResponse({"ok": True})
 
 
@@ -496,26 +539,12 @@ async def ws_endpoint(ws: WebSocket):
                                              or msg.get("attachment")):
                 text = msg.get("text", "").strip()[:4000]
                 crosstalk = bool(msg.get("crosstalk"))
-                attachment, image, kind = None, None, None
-                att = msg.get("attachment") or {}
-                if isinstance(att, dict) and att.get("url"):
-                    safe = os.path.basename(att["url"])
-                    if UPLOAD_RE.match(safe):
-                        ext = safe.rsplit(".", 1)[-1].lower()
-                        kind = "image" if ext in IMAGE_EXTS else "video"
-                        attachment = {"url": f"/uploads/{safe}", "kind": kind,
-                                      "name": str(att.get("name") or safe)[:120]}
-                        if kind == "image":
-                            try:
-                                with open(os.path.join(UPLOAD_DIR, safe),
-                                          "rb") as f:
-                                    raw = f.read()
-                                if raw and len(raw) <= MAX_IMAGE_BYTES:
-                                    image = (IMAGE_MIMES[ext],
-                                             base64.b64encode(raw).decode())
-                            except OSError:
-                                pass
+                funnel = bool(msg.get("funnel"))
+                attachment, image, kind = resolve_attachment(
+                    msg.get("attachment"))
                 entry = {"from": "shavor", "text": text, "ts": now_iso()}
+                if funnel:
+                    entry["funnel"] = True
                 if attachment:
                     entry["attachment"] = attachment
                 await remember(entry)
@@ -532,7 +561,9 @@ async def ws_endpoint(ws: WebSocket):
                     bot_text = (bot_text + "\n\n[Shavor shared a video.]"
                                 if bot_text else
                                 "[Shavor shared a video — acknowledge it.]")
-                await msg_queue.put((bot_text, crosstalk, image))
+                await msg_queue.put({"text": bot_text, "crosstalk": crosstalk,
+                                     "image": image, "funnel": funnel,
+                                     "for_ts": entry["ts"]})
     except WebSocketDisconnect:
         pass
     finally:
