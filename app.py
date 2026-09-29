@@ -46,7 +46,9 @@ DESK_CONTEXT = {
                   "Cost yardstick ~$5.199. Never suggest canceling/resizing the $7 sell."),
     "risk": ("Max 3 names, max $1,500/name, risk <=0.5%/trade (~$77). "
              "Kill switches: -$150/day, -$450/week, -$900/month."),
-    "notes": ("Penny stocks allowed. Nothing-under-$5 retired. "
+    "notes": ("General-purpose room: trading, research, learning, daily life, "
+              "any questions — everyone answers, no hierarchy. "
+              "Penny stocks allowed. Nothing-under-$5 retired. "
               "Day trades, flat overnight by default. Night Desk joins via paste relay."),
 }
 
@@ -142,10 +144,12 @@ async def fan_out(text, crosstalk):
                                   "state": "thinking"})
             reply = await PROVIDERS[name](text)
             first[name] = reply
+            entry = {"from": name, "round": 1, "text": reply,
+                     "ts": now_iso()}
             await room.broadcast({"type": "reply", "provider": name,
-                                  "round": 1, "text": reply})
-            await remember({"from": name, "round": 1, "text": reply,
-                            "ts": now_iso()})
+                                  "round": 1, "text": reply,
+                                  "ts": entry["ts"]})
+            await remember(entry)
         except Exception as e:  # one provider failing never blocks the other
             err = f"{name} failed: {e}"
             log.warning(err)
@@ -161,10 +165,12 @@ async def fan_out(text, crosstalk):
                                       "state": "reacting"})
                 reply = await PROVIDERS[name](
                     text, crosstalk=True, other_take=first[other])
+                entry = {"from": name, "round": 2, "text": reply,
+                         "ts": now_iso()}
                 await room.broadcast({"type": "reply", "provider": name,
-                                      "round": 2, "text": reply})
-                await remember({"from": name, "round": 2, "text": reply,
-                                "ts": now_iso()})
+                                      "round": 2, "text": reply,
+                                      "ts": entry["ts"]})
+                await remember(entry)
             except Exception as e:
                 log.warning("%s cross-talk failed: %s", name, e)
                 await room.broadcast({"type": "status", "provider": name,
@@ -251,7 +257,7 @@ async def ace_reply(request: Request):
     entry = {"from": "ace", "text": text, "ts": now_iso()}
     await remember(entry)
     await room.broadcast({"type": "reply", "provider": "ace",
-                          "round": 1, "text": text})
+                          "round": 1, "text": text, "ts": entry["ts"]})
     # Two-way discussion: when the caller sets discuss=true, Ace's post is
     # also queued for the Grok/Gemini fan-out so Rail and Anchor respond.
     # Framed so the providers know the speaker is Ace, not Shavor.
