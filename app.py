@@ -21,20 +21,52 @@ import json
 import logging
 import os
 import secrets
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from providers import PROVIDERS
+import providers as providers_mod
+
+
+# Shared room memory, maintained by Ace and pushed from the main chat.
+# Injected into every bot prompt so Rail and Anchor remember past
+# conversations the way Ace does. Capped small to protect credits.
+room_memory = {"digest": "", "updated_ts": ""}
+
+
+def load_room_memory():
+    try:
+        with open(MEMORY_PATH) as f:
+            return f.read().strip()
+    except OSError:
+        return ""
+
+
+def save_room_memory(digest):
+    room_memory["digest"] = digest
+    room_memory["updated_ts"] = now_iso()
+    providers_mod.ROOM_MEMORY = digest
+    try:
+        with open(MEMORY_PATH, "w") as f:
+            f.write(f"# Room memory (updated {room_memory['updated_ts']})\n\n{digest}\n")
+    except OSError:
+        pass
 
 log = logging.getLogger("desk-box")
 logging.basicConfig(level=logging.INFO)
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-LOG_PATH = os.path.join(BASE_DIR, "desk-log.jsonl")
-HISTORY_KEEP = 200  # in-memory messages per room
+# Durable data dir — set DESK_DATA_DIR=/data once a Railway volume is mounted
+# there; otherwise everything lives next to the code (ephemeral on Railway).
+DATA_DIR = os.environ.get("DESK_DATA_DIR", BASE_DIR)
+LOG_PATH = os.path.join(DATA_DIR, "desk-log.jsonl")
+MEMORY_PATH = os.path.join(DATA_DIR, "room-memory.md")
+HISTORY_KEEP = 2000   # in-memory messages per room (14-day window)
+HISTORY_SEND = 200    # messages sent to a newly connected UI
+RETENTION_DAYS = 14   # chats are never deleted before this; pruned after
 
 DESK_TOKEN = os.environ.get("DESK_TOKEN") or secrets.token_urlsafe(24)
 
@@ -76,13 +108,16 @@ def append_log(entry):
 async def remember(entry):
     async with history_lock:
         history.append(entry)
-        del history[:max(0, len(history) - HISTORY_KEEP)]
+        cutoff = retention_cutoff()
+        fresh = [e for e in history if e.get("ts", "") >= cutoff]
+        del history[:]
+        history.extend(fresh[-HISTORY_KEEP:])
     append_log(entry)
 
 
 def load_history():
     """Restore room history from the on-disk log so a redeploy/restart
-    doesn't wipe the room. Returns at most HISTORY_KEEP entries."""
+    doesn't wipe the room. Honors the 14-day retention window."""
     entries = []
     try:
         with open(LOG_PATH) as f:
@@ -99,7 +134,21 @@ def load_history():
                     entries.append(e)
     except OSError:
         pass
+    cutoff = retention_cutoff()
+    entries = [e for e in entries if e.get("ts", "") >= cutoff]
+    # Rewrite the log pruned so it never grows past the retention window.
+    try:
+        with open(LOG_PATH, "w") as f:
+            for e in entries:
+                f.write(json.dumps(e) + "\n")
+    except OSError:
+        pass
     return entries[-HISTORY_KEEP:]
+
+
+def retention_cutoff():
+    return (datetime.now(timezone.utc)
+            - timedelta(days=RETENTION_DAYS)).isoformat()
 
 
 class Room:
@@ -197,6 +246,12 @@ async def on_startup():
     async with history_lock:
         history.extend(load_history())
         del history[:max(0, len(history) - HISTORY_KEEP)]
+        # Restore the shared room memory so the bots keep remembering.
+        digest = load_room_memory()
+        if digest:
+            # Strip the header line the saver writes.
+            body = digest.split("\n\n", 1)
+            save_room_memory(body[1] if len(body) > 1 else digest)
     if "DESK_TOKEN" not in os.environ:
         log.info("DESK_TOKEN not set — generated per-boot token.")
     log.info("Desk Box up. Open /?token=%s", DESK_TOKEN)
@@ -241,6 +296,26 @@ async def ace_inbox(token: str = "", since: str = ""):
                 and "@ace" in m.get("text", "").lower()
                 and m.get("ts", "") > since]
     return JSONResponse({"messages": msgs})
+
+
+@app.post("/api/memory")
+async def set_memory(req: Request):
+    """Ace pushes the shared room digest here (from the main chat).
+    Both bots receive it in their prompts from then on."""
+    body = await req.json()
+    if body.get("token") != DESK_TOKEN:
+        return JSONResponse({"error": "bad token"}, status_code=403)
+    digest = (body.get("digest") or "")[:4000]
+    async with history_lock:
+        save_room_memory(digest)
+    return {"ok": True}
+
+
+@app.get("/api/memory")
+async def get_memory(token: str = ""):
+    if token != DESK_TOKEN:
+        return JSONResponse({"error": "bad token"}, status_code=403)
+    return room_memory
 
 
 @app.post("/api/ace-reply")
@@ -295,7 +370,7 @@ async def ws_endpoint(ws: WebSocket):
     await room.add(ws)
     # send recent history so a fresh tab sees the room state
     async with history_lock:
-        recent = list(history[-50:])
+        recent = list(history[-HISTORY_SEND:])
     await ws.send_text(json.dumps({"type": "history", "messages": recent}))
     try:
         while True:

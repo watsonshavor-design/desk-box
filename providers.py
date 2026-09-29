@@ -79,6 +79,23 @@ def _extract_gemini_text(result):
     return "\n".join(texts).strip()
 
 
+# Shared room memory, maintained by Ace and pushed from the main chat.
+# app.py sets this at startup and whenever Ace posts a new digest.
+# Injected into every prompt so both partners remember past conversations.
+ROOM_MEMORY = ""
+
+
+def _with_memory(header):
+    mem = ROOM_MEMORY.strip()
+    if not mem:
+        return header
+    lead = "His message:\n\n"
+    intro = header[:-len(lead)] if header.endswith(lead) else header
+    return (intro + "\nShared room memory — durable facts, decisions, and running threads "
+            "from earlier conversations. Treat as true unless his new message contradicts it:\n"
+            + mem + "\n\n" + lead)
+
+
 async def ask_grok(prompt, max_tokens=1500, crosstalk=False, other_take=""):
     """Ask Grok. If crosstalk, react to the other partner's take instead."""
     if MOCK:
@@ -86,7 +103,7 @@ async def ask_grok(prompt, max_tokens=1500, crosstalk=False, other_take=""):
     key = _need_key("XAI_API_KEY")
     text = (CROSSTALK_HEADER + "Shavor's message:\n" + prompt
             + "\n\nOther partner's take:\n" + other_take) if crosstalk \
-        else DESK_HEADER + prompt
+        else _with_memory(DESK_HEADER) + prompt
     payload = {
         "model": GROK_MODEL,
         "input": text,
@@ -116,7 +133,7 @@ async def ask_gemini(prompt, max_tokens=4000, crosstalk=False, other_take=""):
     key = _need_key("GEMINI_API_KEY")
     text = (CROSSTALK_HEADER + "Shavor's message:\n" + prompt
             + "\n\nOther partner's take:\n" + other_take) if crosstalk \
-        else DESK_HEADER + prompt
+        else _with_memory(DESK_HEADER) + prompt
     payload = {
         "contents": [{"role": "user", "parts": [{"text": text}]}],
         "tools": [{"google_search": {}}],
