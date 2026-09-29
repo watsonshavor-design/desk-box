@@ -29,6 +29,12 @@
              border-radius:10px; padding:7px 10px; font-size:16px; cursor:pointer; }
   .iconbtn.on { border-color:var(--grok); background:#221a38; }
   .iconbtn.rec { border-color:#f85149; background:#3d1414; }
+  /* File picker stays in the DOM but invisible: a <label for> opens it
+     natively, which mobile browsers honor (JS .click() on a hidden
+     input gets silently swallowed). */
+  .filehidden { position:absolute; width:1px; height:1px; opacity:0;
+                pointer-events:none; }
+  label.iconbtn { user-select:none; -webkit-user-select:none; }
   #desk { font-size:12px; color:var(--dim); background:var(--panel);
           border-bottom:1px solid var(--line); padding:8px 14px; line-height:1.5; }
   #desk b { color:var(--txt); }
@@ -88,8 +94,8 @@
     <input type="checkbox" id="xtalk"> <span>cross-talk</span>
   </label>
   <input id="input" placeholder="What's on your mind, Shavor?…" autocomplete="off">
-  <button id="attachBtn" class="iconbtn" title="Send a photo or video">📎</button>
-  <input type="file" id="fileInput" accept="image/*,video/*" style="display:none">
+  <label for="fileInput" id="attachBtn" class="iconbtn" title="Send a photo or video">📎</label>
+  <input type="file" id="fileInput" accept="image/*,video/*" class="filehidden">
   <button id="send">Send</button>
 </div>
 <script>
@@ -280,7 +286,7 @@ input.addEventListener("keydown", e=>{ if(e.key==="Enter") send(); });
 // --- Photo/video: pick a file, upload it, then send it as a chat message ---
 const attachBtn = document.getElementById("attachBtn");
 const fileInput = document.getElementById("fileInput");
-attachBtn.onclick = () => fileInput.click();
+// The <label for="fileInput"> opens the picker natively — no JS click needed.
 fileInput.onchange = async () => {
   const f = fileInput.files[0];
   fileInput.value = "";
