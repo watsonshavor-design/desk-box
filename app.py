@@ -20,10 +20,11 @@ import asyncio
 import json
 import logging
 import os
+import re
 import secrets
 from datetime import datetime, timedelta, timezone
 
-from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, File, Request, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -64,6 +65,15 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.environ.get("DESK_DATA_DIR", BASE_DIR)
 LOG_PATH = os.path.join(DATA_DIR, "desk-log.jsonl")
 MEMORY_PATH = os.path.join(DATA_DIR, "room-memory.md")
+UPLOAD_DIR = os.path.join(DATA_DIR, "uploads")
+# Photos ≤10MB, video ≤50MB. jpeg is stored as .jpg.
+IMAGE_EXT = {"jpg": "image/jpeg", "png": "image/png", "gif": "image/gif",
+             "webp": "image/webp"}
+VIDEO_EXT = {"mp4": "video/mp4", "mov": "video/quicktime", "webm": "video/webm"}
+IMAGE_MAX = 10 * 1024 * 1024
+VIDEO_MAX = 50 * 1024 * 1024
+_UPLOAD_NAME = re.compile(
+    r"^[a-f0-9]{16}\.(jpg|png|gif|webp|mp4|mov|webm)$")
 HISTORY_KEEP = 2000   # in-memory messages per room (14-day window)
 HISTORY_SEND = 200    # messages sent to a newly connected UI
 RETENTION_DAYS = 14   # chats are never deleted before this; pruned after
@@ -129,8 +139,15 @@ def load_history():
                     e = json.loads(line)
                 except json.JSONDecodeError:
                     continue
-                if (isinstance(e, dict) and e.get("from")
-                        and e.get("text") and e.get("ts")):
+                if not (isinstance(e, dict) and e.get("from") and e.get("ts")):
+                    continue
+                if e.get("attachment"):
+                    att = normalize_attachment(e["attachment"])
+                    if att:
+                        e["attachment"] = att
+                    else:
+                        e.pop("attachment", None)
+                if e.get("text") or e.get("attachment"):
                     entries.append(e)
     except OSError:
         pass
@@ -149,6 +166,70 @@ def load_history():
 def retention_cutoff():
     return (datetime.now(timezone.utc)
             - timedelta(days=RETENTION_DAYS)).isoformat()
+
+
+def _kind_for(ext):
+    if ext in IMAGE_EXT:
+        return "image"
+    if ext in VIDEO_EXT:
+        return "video"
+    return ""
+
+
+def _looks_like(ext, blob):
+    """Reject a renamed file whose header is not the claimed media type."""
+    if ext == "jpg":
+        return blob.startswith(b"\xff\xd8\xff")
+    if ext == "png":
+        return blob.startswith(b"\x89PNG\r\n\x1a\n")
+    if ext == "gif":
+        return blob.startswith(b"GIF87a") or blob.startswith(b"GIF89a")
+    if ext == "webp":
+        return (len(blob) >= 12 and blob[:4] == b"RIFF"
+                and blob[8:12] == b"WEBP")
+    if ext in ("mp4", "mov"):
+        return len(blob) >= 12 and blob[4:8] == b"ftyp"
+    if ext == "webm":
+        return blob.startswith(b"\x1a\x45\xdf\xa3")
+    return False
+
+
+def _clean_display_name(name, fallback):
+    base = os.path.basename(str(name or "")).replace("\x00", "").strip()
+    return (base[:120] or fallback)
+
+
+def normalize_attachment(raw):
+    """Keep only attachments this server actually stored."""
+    if not isinstance(raw, dict):
+        return None
+    url = str(raw.get("url") or "")
+    prefix = "/uploads/"
+    if not url.startswith(prefix):
+        return None
+    filename = url[len(prefix):]
+    if not _UPLOAD_NAME.match(filename):
+        return None
+    ext = filename.rsplit(".", 1)[-1]
+    kind = _kind_for(ext)
+    if raw.get("kind") != kind:
+        return None
+    path = os.path.realpath(os.path.join(UPLOAD_DIR, filename))
+    root = os.path.realpath(UPLOAD_DIR)
+    if not path.startswith(root + os.sep) or not os.path.isfile(path):
+        return None
+    return {"url": prefix + filename, "kind": kind,
+            "name": _clean_display_name(raw.get("name"), filename)}
+
+
+def prompt_for(text, attachment):
+    """Tell the models a file was attached. They never receive the bytes."""
+    if not attachment:
+        return text
+    label = "photo" if attachment["kind"] == "image" else "video"
+    note = (f"[Attached {label}: {attachment['name']}. "
+            "You cannot see the file; respond to the caption.]")
+    return f"{text}\n\n{note}".strip() if text else note
 
 
 class Room:
@@ -241,6 +322,7 @@ async def worker():
 
 @app.on_event("startup")
 async def on_startup():
+    os.makedirs(UPLOAD_DIR, exist_ok=True)
     asyncio.create_task(worker())
     # Restore room history from disk — otherwise every redeploy wipes it.
     async with history_lock:
@@ -345,6 +427,93 @@ async def ace_reply(request: Request):
     return JSONResponse({"ok": True})
 
 
+def _upload_ext(filename):
+    name = os.path.basename(filename or "")
+    if "." not in name:
+        return ""
+    ext = name.rsplit(".", 1)[-1].lower()
+    return "jpg" if ext == "jpeg" else ext
+
+
+@app.post("/api/upload")
+async def upload_media(token: str = "", file: UploadFile = File(...)):
+    """Store one photo or video. Field name is `file`."""
+    if token != DESK_TOKEN:
+        return JSONResponse({"error": "bad token"}, status_code=403)
+    ext = _upload_ext(file.filename or "")
+    kind = _kind_for(ext)
+    if not kind:
+        await file.close()
+        return JSONResponse({"error": "unsupported type"}, status_code=400)
+    limit = IMAGE_MAX if kind == "image" else VIDEO_MAX
+    ctype = (file.content_type or "").split(";")[0].strip().lower()
+    expected = IMAGE_EXT[ext] if kind == "image" else VIDEO_EXT[ext]
+    allowed_types = {expected, "application/octet-stream", ""}
+    if ext == "jpg":
+        allowed_types.add("image/jpg")
+    if ext == "mov":
+        allowed_types.add("video/mp4")
+    if ctype not in allowed_types:
+        await file.close()
+        return JSONResponse({"error": "unsupported type"}, status_code=400)
+
+    os.makedirs(UPLOAD_DIR, exist_ok=True)
+    filename = secrets.token_hex(8) + "." + ext
+    dest = os.path.join(UPLOAD_DIR, filename)
+    size = 0
+    header = b""
+    too_big = False
+    try:
+        try:
+            with open(dest, "wb") as out:
+                while True:
+                    chunk = await file.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    if len(header) < 16:
+                        header += chunk[:16 - len(header)]
+                    size += len(chunk)
+                    if size > limit:
+                        too_big = True
+                        break
+                    out.write(chunk)
+        except Exception:
+            try:
+                os.remove(dest)
+            except OSError:
+                pass
+            raise
+    finally:
+        await file.close()
+
+    if too_big or size == 0 or not _looks_like(ext, header):
+        try:
+            os.remove(dest)
+        except OSError:
+            pass
+        if too_big:
+            return JSONResponse({"error": "file too large"}, status_code=413)
+        return JSONResponse({"error": "unsupported type"}, status_code=400)
+
+    return {"ok": True, "url": "/uploads/" + filename, "kind": kind}
+
+
+@app.get("/uploads/{filename}")
+async def serve_upload(filename: str, token: str = ""):
+    if token != DESK_TOKEN:
+        return JSONResponse({"error": "bad token"}, status_code=403)
+    if not _UPLOAD_NAME.match(filename):
+        return JSONResponse({"error": "not found"}, status_code=404)
+    path = os.path.realpath(os.path.join(UPLOAD_DIR, filename))
+    root = os.path.realpath(UPLOAD_DIR)
+    if not path.startswith(root + os.sep) or not os.path.isfile(path):
+        return JSONResponse({"error": "not found"}, status_code=404)
+    ext = filename.rsplit(".", 1)[-1]
+    media = IMAGE_EXT.get(ext) or VIDEO_EXT.get(ext) or "application/octet-stream"
+    return FileResponse(path, media_type=media,
+                        headers={"Cache-Control": "private, max-age=3600"})
+
+
 @app.get("/api/recent")
 async def recent(token: str = "", limit: int = 20):
     """Last N room messages (all senders) — lets the Ace bridge worker see
@@ -379,14 +548,21 @@ async def ws_endpoint(ws: WebSocket):
                 msg = json.loads(raw)
             except json.JSONDecodeError:
                 continue
-            if msg.get("type") == "user" and msg.get("text", "").strip():
-                text = msg["text"].strip()[:4000]
+            if msg.get("type") == "user":
+                text = str(msg.get("text") or "").strip()[:4000]
+                attachment = normalize_attachment(msg.get("attachment"))
+                if not text and not attachment:
+                    continue
                 crosstalk = bool(msg.get("crosstalk"))
                 entry = {"from": "shavor", "text": text, "ts": now_iso()}
+                if attachment:
+                    entry["attachment"] = attachment
                 await remember(entry)
-                await room.broadcast({"type": "user", "text": text,
-                                      "ts": entry["ts"]})
-                await msg_queue.put((text, crosstalk))
+                payload = {"type": "user", "text": text, "ts": entry["ts"]}
+                if attachment:
+                    payload["attachment"] = attachment
+                await room.broadcast(payload)
+                await msg_queue.put((prompt_for(text, attachment), crosstalk))
     except WebSocketDisconnect:
         pass
     finally:

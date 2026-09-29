@@ -3,3 +3,4 @@ __pycache__
 .env
 .git
 desk-log.jsonl
+uploads/

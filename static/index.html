@@ -62,6 +62,19 @@
   #send:disabled { opacity:.4; }
   .toggle { display:flex; align-items:center; gap:6px; font-size:12px; color:var(--dim);
             white-space:nowrap; }
+  .msg img.media, .msg video.media { display:block; max-width:100%; margin-top:8px;
+                                     border-radius:10px; }
+  .msg img.media { max-height:320px; object-fit:contain; background:#0d1117; }
+  .msg video.media { width:100%; max-height:360px; background:#000; }
+  #pending { display:none; align-items:center; gap:8px; padding:8px 12px;
+             border-top:1px solid var(--line); background:var(--panel);
+             font-size:12px; color:var(--dim); }
+  #pending.on { display:flex; }
+  #pending img, #pending video { width:42px; height:42px; object-fit:cover;
+                                 border-radius:8px; background:#000; }
+  #pending .pname { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  #pending button { margin-left:auto; }
+  #attachNote { color:#f85149; }
   #gate { margin:auto; max-width:340px; text-align:center; padding:24px;
           background:var(--panel); border:1px solid var(--line); border-radius:14px; }
   #gate h2 { margin:0 0 8px; font-size:17px; }
@@ -83,7 +96,11 @@
 </header>
 <div id="desk">loading desk context…</div>
 <div id="log"></div>
+<div id="pending"></div>
 <div id="bar">
+  <button id="attachBtn" class="iconbtn" type="button" title="Attach a photo or video">📎</button>
+  <input id="file" type="file" hidden
+         accept="image/jpeg,image/png,image/gif,image/webp,video/mp4,video/quicktime,video/webm,.jpg,.jpeg,.png,.gif,.webp,.mp4,.mov,.webm">
   <label class="toggle" title="Each model reacts to the other's take before the round closes">
     <input type="checkbox" id="xtalk"> <span>cross-talk</span>
   </label>
@@ -134,15 +151,33 @@ const NAMES = {
   me:     ["SHAVOR", null]
 };
 
-function addMsg(who, text, round, ts){
+function safeAttachment(att){
+  if (!att || typeof att !== "object") return null;
+  const url = String(att.url || "");
+  if (!/^\/uploads\/[a-f0-9]{16}\.(jpg|png|gif|webp|mp4|mov|webm)$/.test(url)) return null;
+  const ext = url.split(".").pop();
+  const kind = (ext === "mp4" || ext === "mov" || ext === "webm") ? "video" : "image";
+  if (att.kind !== kind) return null;
+  return {url, kind, name: String(att.name || "")};
+}
+function mediaHtml(att){
+  att = safeAttachment(att);
+  if (!att) return "";
+  const src = att.url + "?token=" + encodeURIComponent(token);
+  if (att.kind === "video")
+    return `<video class="media" src="${esc(src)}" controls playsinline preload="metadata"></video>`;
+  return `<img class="media" src="${esc(src)}" alt="${esc(att.name || "photo")}">`;
+}
+function addMsg(who, text, round, ts, attachment){
   const div = document.createElement("div");
   div.className = "msg " + who;
   const nm = NAMES[who] || [who.toUpperCase(), null];
   const av = nm[1] ? `<img class="av" src="${nm[1]}" alt="">` : "";
+  const body = (text ? `<div>${esc(text)}</div>` : "") + mediaHtml(attachment);
   div.innerHTML = `<div class="who ${who}">${av}${nm[0]}` +
     (round && round>1 ? `<span class="round">round ${round} · reacts</span>` : "") +
     `<span class="ts">${esc(fmtTs(ts))}</span>` +
-    `</div><div>${esc(text)}</div>`;
+    `</div>` + body;
   log.appendChild(div); log.scrollTop = log.scrollHeight;
   return div;
 }
@@ -247,9 +282,9 @@ function connect(){
   ws.onmessage = (ev) => {
     const m = JSON.parse(ev.data);
     if(m.type==="history"){ log.innerHTML=""; (m.messages||[]).forEach(x=>{
-        if(x.from==="shavor") addMsg("me", x.text, null, x.ts);
-        else addMsg(x.from, x.text, x.round, x.ts); }); }
-    else if(m.type==="user"){ addMsg("me", m.text, null, m.ts); }
+        if(x.from==="shavor") addMsg("me", x.text, null, x.ts, x.attachment);
+        else addMsg(x.from, x.text, x.round, x.ts, x.attachment); }); }
+    else if(m.type==="user"){ addMsg("me", m.text, null, m.ts, m.attachment); }
     else if(m.type==="status"){ setThinking(m.provider, m.state);
         if(m.state==="error") addMsg(m.provider, "⚠ " + (m.detail||"request failed"), null, null); }
     else if(m.type==="reply"){ setThinking(m.provider, "done"); addMsg(m.provider, m.text, m.round, m.ts); speak(m.provider, m.text); }
@@ -257,11 +292,79 @@ function connect(){
   };
 }
 
+const IMAGE_MAX = 10 * 1024 * 1024;
+const VIDEO_MAX = 50 * 1024 * 1024;
+const fileInput = document.getElementById("file");
+const attachBtn = document.getElementById("attachBtn");
+const pendingEl = document.getElementById("pending");
+let pending = null, uploading = false;
+
+function extOf(name){
+  const n = (name || "").toLowerCase();
+  const ext = n.includes(".") ? n.split(".").pop() : "";
+  return ext === "jpeg" ? "jpg" : ext;
+}
+function kindOf(ext){
+  if (["jpg","png","gif","webp"].includes(ext)) return "image";
+  if (["mp4","mov","webm"].includes(ext)) return "video";
+  return "";
+}
+function setPendingNote(html, on){
+  pendingEl.innerHTML = html;
+  pendingEl.classList.toggle("on", !!on);
+}
+function clearPending(){
+  pending = null;
+  fileInput.value = "";
+  setPendingNote("", false);
+}
+attachBtn.onclick = () => { if (!uploading) fileInput.click(); };
+fileInput.onchange = async () => {
+  const f = fileInput.files && fileInput.files[0];
+  if (!f) return;
+  const ext = extOf(f.name);
+  const kind = kindOf(ext);
+  const limit = kind === "image" ? IMAGE_MAX : kind === "video" ? VIDEO_MAX : 0;
+  if (!kind) { setPendingNote(`<span id="attachNote">Use a jpg, png, gif, webp, mp4, mov, or webm.</span>`, true); fileInput.value = ""; return; }
+  if (f.size > limit) {
+    setPendingNote(`<span id="attachNote">${kind === "image" ? "Photos" : "Videos"} must be ${kind === "image" ? "10" : "50"}MB or smaller.</span>`, true);
+    fileInput.value = "";
+    return;
+  }
+  uploading = true;
+  attachBtn.disabled = true;
+  setPendingNote("Uploading…", true);
+  try {
+    const body = new FormData();
+    body.append("file", f, f.name);
+    const res = await fetch("/api/upload?token=" + encodeURIComponent(token), {method:"POST", body});
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data.ok) throw new Error(data.error || "upload failed");
+    pending = {url: data.url, kind: data.kind, name: f.name};
+    const src = data.url + "?token=" + encodeURIComponent(token);
+    const thumb = data.kind === "video"
+      ? `<video src="${esc(src)}" muted></video>`
+      : `<img src="${esc(src)}" alt="">`;
+    setPendingNote(thumb + `<span class="pname">${esc(f.name)}</span><button id="clearAtt" class="iconbtn" type="button" title="Remove">✕</button>`, true);
+    document.getElementById("clearAtt").onclick = clearPending;
+  } catch (err) {
+    pending = null;
+    setPendingNote(`<span id="attachNote">${esc(err.message || "upload failed")}</span>`, true);
+  } finally {
+    uploading = false;
+    attachBtn.disabled = false;
+    fileInput.value = "";
+  }
+};
+
 function send(){
   const text = input.value.trim();
-  if(!text || !ws || ws.readyState!==1) return;
-  ws.send(JSON.stringify({type:"user", text, crosstalk: xtalk.checked}));
+  if (uploading || (!text && !pending) || !ws || ws.readyState!==1) return;
+  const payload = {type:"user", text, crosstalk: xtalk.checked};
+  if (pending) payload.attachment = pending;
+  ws.send(JSON.stringify(payload));
   input.value = "";
+  clearPending();
 }
 
 sendBtn.onclick = send;
