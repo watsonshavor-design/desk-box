@@ -3,13 +3,13 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
-<title>Desk — live room</title>
+<title>Shavor's Desk ♠️</title>
 <link rel="manifest" href="/static/manifest.json">
 <meta name="theme-color" content="#0d1117">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="Desk Box">
+<meta name="apple-mobile-web-app-title" content="Shavor's Desk">
 <link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
 <link rel="icon" type="image/png" sizes="32x32" href="/static/favicon-32.png">
 <style>
@@ -25,9 +25,14 @@
   header .spade { color:var(--grok); }
   #status { margin-left:auto; font-size:12px; color:var(--dim); }
   #status.on { color:#3fb950; }
+  .iconbtn { background:transparent; border:1px solid var(--line); color:var(--txt);
+             border-radius:10px; padding:7px 10px; font-size:16px; cursor:pointer; }
+  .iconbtn.on { border-color:var(--grok); background:#221a38; }
+  .iconbtn.rec { border-color:#f85149; background:#3d1414; }
   #desk { font-size:12px; color:var(--dim); background:var(--panel);
           border-bottom:1px solid var(--line); padding:8px 14px; line-height:1.5; }
   #desk b { color:var(--txt); }
+  #desk .greet { color:var(--txt); font-weight:600; }
   #log { flex:1; overflow-y:auto; padding:14px; display:flex;
          flex-direction:column; gap:10px; }
   .msg { max-width:92%; padding:10px 12px; border-radius:12px; line-height:1.5;
@@ -71,8 +76,10 @@
 </head>
 <body>
 <header>
-  <span class="spade">♠️</span><h1>Desk — live room</h1>
+  <span class="spade">♠️</span><h1>Shavor's Desk</h1>
   <span id="status">connecting…</span>
+  <button id="speakBtn" class="iconbtn" title="Read new messages aloud">🔇</button>
+  <button id="micBtn" class="iconbtn" title="Dictate your message">🎤</button>
 </header>
 <div id="desk">loading desk context…</div>
 <div id="log"></div>
@@ -80,7 +87,7 @@
   <label class="toggle" title="Each model reacts to the other's take before the round closes">
     <input type="checkbox" id="xtalk"> <span>cross-talk</span>
   </label>
-  <input id="input" placeholder="Message the desk…" autocomplete="off">
+  <input id="input" placeholder="What's on your mind, Shavor?…" autocomplete="off">
   <button id="send">Send</button>
 </div>
 <script>
@@ -95,7 +102,7 @@ try {
 if (!token) {
   document.getElementById("desk").textContent = "Token required to join the desk.";
   document.getElementById("log").innerHTML =
-    `<div id="gate"><h2>♠️ Desk Box</h2>` +
+    `<div id="gate"><h2>♠️ Shavor's Desk</h2>` +
     `<p>Paste your room token once — this device remembers it, so the ` +
     `home-screen app opens straight into the room.</p>` +
     `<input id="gtok" placeholder="room token" autocomplete="off">` +
@@ -113,6 +120,8 @@ const input = document.getElementById("input");
 const sendBtn = document.getElementById("send");
 const statusEl = document.getElementById("status");
 const xtalk = document.getElementById("xtalk");
+const speakBtn = document.getElementById("speakBtn");
+const micBtn = document.getElementById("micBtn");
 let ws = null, pending = {};
 
 function esc(s){ const d=document.createElement("div"); d.textContent=s; return d.innerHTML; }
@@ -138,13 +147,84 @@ function addMsg(who, text, round, ts){
   return div;
 }
 
-// Every message shows who said it and when — name + date + time, always.
+// Every message shows who said it and when — name + date + 12-hour time.
 function fmtTs(ts){
   try {
     const d = ts ? new Date(ts) : new Date();
     return d.toLocaleString(undefined,
       {month:"numeric", day:"numeric", hour:"numeric", minute:"2-digit", hour12:true});
   } catch(e){ return ""; }
+}
+
+// --- Voice: hear the room -------------------------------------------------
+// Free and on-device (Web Speech API) — costs zero credits.
+let speakOn = false;
+const VOICE_STYLE = {
+  grok:   {pitch:0.75, rate:1.0},   // Rail — low and steady
+  gemini: {pitch:1.05, rate:1.0},   // Anchor — even
+  ace:    {pitch:1.2,  rate:1.03},  // Ace — a touch brighter
+};
+let voicePool = [];
+function initVoices(){
+  try {
+    const all = speechSynthesis.getVoices();
+    voicePool = all.filter(v => /^en/i.test(v.lang || ""));
+    if (!voicePool.length) voicePool = all;
+  } catch(e) {}
+}
+if ("speechSynthesis" in window) {
+  initVoices();
+  speechSynthesis.onvoiceschanged = initVoices;
+}
+function speak(who, text){
+  if (!speakOn || !("speechSynthesis" in window)) return;
+  try {
+    speechSynthesis.cancel(); // one voice at a time — newest message wins
+    const u = new SpeechSynthesisUtterance(text);
+    const style = VOICE_STYLE[who] || {pitch:1, rate:1};
+    // Spread distinct English voices across the three personas when available.
+    const idx = {grok:0, gemini:1, ace:2}[who];
+    if (voicePool.length && idx !== undefined)
+      u.voice = voicePool[idx % voicePool.length];
+    u.pitch = style.pitch; u.rate = style.rate;
+    speechSynthesis.speak(u);
+  } catch(e) {}
+}
+speakBtn.onclick = () => {
+  speakOn = !speakOn;
+  speakBtn.textContent = speakOn ? "🔊" : "🔇";
+  speakBtn.classList.toggle("on", speakOn);
+  if (!speakOn && "speechSynthesis" in window) {
+    try { speechSynthesis.cancel(); } catch(e) {}
+  } else if (speakOn) {
+    initVoices();
+    speak("ace", "Speaker on. I'll read new messages out loud. Tap again to mute me.");
+  }
+};
+
+// --- Voice: talk instead of type -------------------------------------------
+const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+let rec = null, recOn = false;
+if (!SR) { micBtn.style.display = "none"; }
+else {
+  micBtn.onclick = () => {
+    if (recOn) { try { rec.stop(); } catch(e) {} return; }
+    try { if ("speechSynthesis" in window) speechSynthesis.cancel(); } catch(e) {}
+    rec = new SR();
+    rec.lang = "en-US"; rec.interimResults = false; rec.maxAlternatives = 1;
+    rec.onresult = (ev) => {
+      const t = ev.results[0][0].transcript || "";
+      input.value = (input.value ? input.value + " " : "") + t;
+      input.focus();
+    };
+    rec.onend = rec.onerror = () => {
+      recOn = false; micBtn.textContent = "🎤"; micBtn.classList.remove("rec");
+    };
+    try {
+      rec.start();
+      recOn = true; micBtn.textContent = "🔴"; micBtn.classList.add("rec");
+    } catch(e) { recOn = false; }
+  };
 }
 
 function setThinking(provider, state){
@@ -172,7 +252,7 @@ function connect(){
     else if(m.type==="user"){ addMsg("me", m.text, null, m.ts); }
     else if(m.type==="status"){ setThinking(m.provider, m.state);
         if(m.state==="error") addMsg(m.provider, "⚠ " + (m.detail||"request failed"), null, null); }
-    else if(m.type==="reply"){ setThinking(m.provider, "done"); addMsg(m.provider, m.text, m.round, m.ts); }
+    else if(m.type==="reply"){ setThinking(m.provider, "done"); addMsg(m.provider, m.text, m.round, m.ts); speak(m.provider, m.text); }
     else if(m.type==="done"){ /* round closed */ }
   };
 }
@@ -187,8 +267,13 @@ function send(){
 sendBtn.onclick = send;
 input.addEventListener("keydown", e=>{ if(e.key==="Enter") send(); });
 
+function greeting(){
+  const hr = new Date().getHours();
+  return hr < 12 ? "Good morning" : hr < 17 ? "Good afternoon" : "Good evening";
+}
 fetch("/api/desk?token="+encodeURIComponent(token)).then(r=>r.json()).then(d=>{
   document.getElementById("desk").innerHTML =
+    `<span class="greet">${greeting()}, Shavor.</span><br>` +
     `<b>Goal:</b> ${esc(d.goal||"")} &nbsp;·&nbsp; <b>GLND lock:</b> ${esc(d.glnd_lock||"")}<br>`+
     `<b>Risk:</b> ${esc(d.risk||"")}<br><span>${esc(d.notes||"")}</span>`;
 }).catch(()=>{ document.getElementById("desk").textContent="desk context unavailable"; });
