@@ -96,14 +96,26 @@ def _with_memory(header):
             + mem + "\n\n" + lead)
 
 
-async def ask_grok(prompt, max_tokens=1500, crosstalk=False, other_take=""):
-    """Ask Grok. If crosstalk, react to the other partner's take instead."""
+async def ask_grok(prompt, max_tokens=1500, crosstalk=False, other_take="",
+                 image=None):
+    """Ask Grok. If crosstalk, react to the other partner's take instead.
+    image is an optional (mime_type, base64) tuple — Grok sees the photo."""
     if MOCK:
         return _mock_reply("grok", other_take or prompt)
     key = _need_key("XAI_API_KEY")
-    text = (CROSSTALK_HEADER + "Shavor's message:\n" + prompt
-            + "\n\nOther partner's take:\n" + other_take) if crosstalk \
-        else _with_memory(DESK_HEADER) + prompt
+    if crosstalk:
+        text = (CROSSTALK_HEADER + "Shavor's message:\n" + prompt
+                + "\n\nOther partner's take:\n" + other_take)
+    elif image:
+        mime, b64 = image
+        text = [{"role": "user", "content": [
+            {"type": "input_text",
+             "text": _with_memory(DESK_HEADER) + prompt},
+            {"type": "input_image",
+             "image_url": f"data:{mime};base64,{b64}"},
+        ]}]
+    else:
+        text = _with_memory(DESK_HEADER) + prompt
     payload = {
         "model": GROK_MODEL,
         "input": text,
@@ -126,16 +138,22 @@ async def ask_grok(prompt, max_tokens=1500, crosstalk=False, other_take=""):
     return out
 
 
-async def ask_gemini(prompt, max_tokens=4000, crosstalk=False, other_take=""):
-    """Ask Gemini. If crosstalk, react to the other partner's take instead."""
+async def ask_gemini(prompt, max_tokens=4000, crosstalk=False, other_take="",
+                   image=None):
+    """Ask Gemini. image is an optional (mime_type, base64) tuple."""
     if MOCK:
         return _mock_reply("gemini", other_take or prompt)
     key = _need_key("GEMINI_API_KEY")
-    text = (CROSSTALK_HEADER + "Shavor's message:\n" + prompt
-            + "\n\nOther partner's take:\n" + other_take) if crosstalk \
-        else _with_memory(DESK_HEADER) + prompt
+    if crosstalk:
+        parts = [{"text": (CROSSTALK_HEADER + "Shavor's message:\n" + prompt
+                           + "\n\nOther partner's take:\n" + other_take)}]
+    else:
+        parts = [{"text": _with_memory(DESK_HEADER) + prompt}]
+        if image:
+            mime, b64 = image
+            parts.append({"inline_data": {"mime_type": mime, "data": b64}})
     payload = {
-        "contents": [{"role": "user", "parts": [{"text": text}]}],
+        "contents": [{"role": "user", "parts": parts}],
         "tools": [{"google_search": {}}],
         "generationConfig": {
             "temperature": 0.3,

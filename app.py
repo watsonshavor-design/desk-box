@@ -17,13 +17,16 @@ Security notes:
 Run:  uvicorn app:app --host 0.0.0.0 --port 8000
 """
 import asyncio
+import base64
 import json
 import logging
 import os
+import re
 import secrets
+import uuid
 from datetime import datetime, timedelta, timezone
 
-from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, File, Request, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -67,6 +70,34 @@ MEMORY_PATH = os.path.join(DATA_DIR, "room-memory.md")
 HISTORY_KEEP = 2000   # in-memory messages per room (14-day window)
 HISTORY_SEND = 200    # messages sent to a newly connected UI
 RETENTION_DAYS = 14   # chats are never deleted before this; pruned after
+
+# Photo/video sharing: files live on the durable volume (when mounted),
+# served token-gated, pruned with the 14-day retention window.
+UPLOAD_DIR = os.path.join(DATA_DIR, "uploads")
+IMAGE_EXTS = {"jpg", "jpeg", "png", "gif", "webp"}
+VIDEO_EXTS = {"mp4", "mov", "webm"}
+IMAGE_MIMES = {"jpg": "image/jpeg", "jpeg": "image/jpeg", "png": "image/png",
+               "gif": "image/gif", "webp": "image/webp"}
+MAX_IMAGE_BYTES = 10 * 1024 * 1024
+MAX_VIDEO_BYTES = 50 * 1024 * 1024
+UPLOAD_RE = re.compile(r"^[0-9a-f]{32}\.(jpg|jpeg|png|gif|webp|mp4|mov|webm)$")
+
+
+def prune_uploads():
+    """Delete uploaded files older than the retention window."""
+    cutoff = (datetime.now(timezone.utc)
+              - timedelta(days=RETENTION_DAYS)).timestamp()
+    try:
+        os.makedirs(UPLOAD_DIR, exist_ok=True)
+        for name in os.listdir(UPLOAD_DIR):
+            p = os.path.join(UPLOAD_DIR, name)
+            try:
+                if os.path.isfile(p) and os.path.getmtime(p) < cutoff:
+                    os.remove(p)
+            except OSError:
+                pass
+    except OSError:
+        pass
 
 DESK_TOKEN = os.environ.get("DESK_TOKEN") or secrets.token_urlsafe(24)
 
@@ -183,15 +214,17 @@ class Room:
 room = Room()
 
 
-async def fan_out(text, crosstalk):
-    """Ask Grok and Gemini in parallel; optionally run one cross-talk round."""
+async def fan_out(text, crosstalk, image=None):
+    """Ask Grok and Gemini in parallel; optionally run one cross-talk round.
+    image is an optional (mime_type, base64) tuple — both partners can see
+    photos, so a chart screenshot gets two expert reads, not just pixels."""
     first = {}
 
     async def one(name):
         try:
             await room.broadcast({"type": "status", "provider": name,
                                   "state": "thinking"})
-            reply = await PROVIDERS[name](text)
+            reply = await PROVIDERS[name](text, image=image)
             first[name] = reply
             entry = {"from": name, "round": 1, "text": reply,
                      "ts": now_iso()}
@@ -213,7 +246,7 @@ async def fan_out(text, crosstalk):
                 await room.broadcast({"type": "status", "provider": name,
                                       "state": "reacting"})
                 reply = await PROVIDERS[name](
-                    text, crosstalk=True, other_take=first[other])
+                    text, crosstalk=True, other_take=first[other], image=image)
                 entry = {"from": name, "round": 2, "text": reply,
                          "ts": now_iso()}
                 await room.broadcast({"type": "reply", "provider": name,
@@ -232,9 +265,9 @@ async def fan_out(text, crosstalk):
 
 async def worker():
     while True:
-        text, crosstalk = await msg_queue.get()
+        text, crosstalk, image = await msg_queue.get()
         try:
-            await fan_out(text, crosstalk)
+            await fan_out(text, crosstalk, image)
         finally:
             msg_queue.task_done()
 
@@ -246,6 +279,7 @@ async def on_startup():
     async with history_lock:
         history.extend(load_history())
         del history[:max(0, len(history) - HISTORY_KEEP)]
+        prune_uploads()
         # Restore the shared room memory so the bots keep remembering.
         digest = load_room_memory()
         if digest:
@@ -318,6 +352,53 @@ async def get_memory(token: str = ""):
     return room_memory
 
 
+@app.post("/api/upload")
+async def upload(token: str = "", file: UploadFile = File(...)):
+    """Photo/video sharing. Stores the file on the durable volume,
+    token-gated, pruned with the 14-day retention window."""
+    if token != DESK_TOKEN:
+        return JSONResponse({"error": "bad token"}, status_code=403)
+    raw_name = file.filename or ""
+    ext = raw_name.rsplit(".", 1)[-1].lower() if "." in raw_name else ""
+    if ext in IMAGE_EXTS:
+        kind, cap = "image", MAX_IMAGE_BYTES
+    elif ext in VIDEO_EXTS:
+        kind, cap = "video", MAX_VIDEO_BYTES
+    else:
+        return JSONResponse(
+            {"error": "only photos (jpg/png/gif/webp) and videos (mp4/mov/webm)"},
+            status_code=400)
+    data = await file.read()
+    if not data:
+        return JSONResponse({"error": "empty file"}, status_code=400)
+    if len(data) > cap:
+        return JSONResponse(
+            {"error": f"file too large (max {cap // 1024 // 1024} MB)"},
+            status_code=400)
+    os.makedirs(UPLOAD_DIR, exist_ok=True)
+    fname = f"{uuid.uuid4().hex}.{ext}"
+    try:
+        with open(os.path.join(UPLOAD_DIR, fname), "wb") as f:
+            f.write(data)
+    except OSError:
+        return JSONResponse({"error": "storage failed"}, status_code=500)
+    return {"ok": True, "url": f"/uploads/{fname}", "kind": kind,
+            "name": raw_name[:120]}
+
+
+@app.get("/uploads/{fname}")
+async def get_upload(fname: str, token: str = ""):
+    if token != DESK_TOKEN:
+        return JSONResponse({"error": "bad token"}, status_code=403)
+    safe = os.path.basename(fname)
+    if not UPLOAD_RE.match(safe):
+        return JSONResponse({"error": "not found"}, status_code=404)
+    path = os.path.join(UPLOAD_DIR, safe)
+    if not os.path.isfile(path):
+        return JSONResponse({"error": "not found"}, status_code=404)
+    return FileResponse(path)
+
+
 @app.post("/api/ace-reply")
 async def ace_reply(request: Request):
     try:
@@ -341,7 +422,7 @@ async def ace_reply(request: Request):
     if body.get("discuss") is True:
         framed = ("[From Ace, your fellow desk partner — respond to him as a "
                   "peer, not as Shavor. Direct and plain.]\n\n" + text)
-        await msg_queue.put((framed, False))
+        await msg_queue.put((framed, False, None))
     return JSONResponse({"ok": True})
 
 
@@ -379,14 +460,47 @@ async def ws_endpoint(ws: WebSocket):
                 msg = json.loads(raw)
             except json.JSONDecodeError:
                 continue
-            if msg.get("type") == "user" and msg.get("text", "").strip():
-                text = msg["text"].strip()[:4000]
+            if msg.get("type") == "user" and (msg.get("text", "").strip()
+                                             or msg.get("attachment")):
+                text = msg.get("text", "").strip()[:4000]
                 crosstalk = bool(msg.get("crosstalk"))
+                attachment, image, kind = None, None, None
+                att = msg.get("attachment") or {}
+                if isinstance(att, dict) and att.get("url"):
+                    safe = os.path.basename(att["url"])
+                    if UPLOAD_RE.match(safe):
+                        ext = safe.rsplit(".", 1)[-1].lower()
+                        kind = "image" if ext in IMAGE_EXTS else "video"
+                        attachment = {"url": f"/uploads/{safe}", "kind": kind,
+                                      "name": str(att.get("name") or safe)[:120]}
+                        if kind == "image":
+                            try:
+                                with open(os.path.join(UPLOAD_DIR, safe),
+                                          "rb") as f:
+                                    raw = f.read()
+                                if raw and len(raw) <= MAX_IMAGE_BYTES:
+                                    image = (IMAGE_MIMES[ext],
+                                             base64.b64encode(raw).decode())
+                            except OSError:
+                                pass
                 entry = {"from": "shavor", "text": text, "ts": now_iso()}
+                if attachment:
+                    entry["attachment"] = attachment
                 await remember(entry)
-                await room.broadcast({"type": "user", "text": text,
-                                      "ts": entry["ts"]})
-                await msg_queue.put((text, crosstalk))
+                bcast = {"type": "user", "text": text, "ts": entry["ts"]}
+                if attachment:
+                    bcast["attachment"] = attachment
+                await room.broadcast(bcast)
+                # Bots get the photo itself (vision); video is acknowledged
+                # in words since the providers only take images.
+                bot_text = text
+                if kind == "image" and not bot_text:
+                    bot_text = "[Shavor shared a photo — look at it and respond to what you see.]"
+                elif kind == "video":
+                    bot_text = (bot_text + "\n\n[Shavor shared a video.]"
+                                if bot_text else
+                                "[Shavor shared a video — acknowledge it.]")
+                await msg_queue.put((bot_text, crosstalk, image))
     except WebSocketDisconnect:
         pass
     finally:
