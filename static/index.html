@@ -93,6 +93,9 @@
   <label class="toggle" title="Each model reacts to the other's take before the round closes">
     <input type="checkbox" id="xtalk"> <span>cross-talk</span>
   </label>
+  <label class="toggle" title="Rail and Anchor brief Ace privately — you get one synthesized answer">
+    <input type="checkbox" id="funnel" checked> <span>one answer</span>
+  </label>
   <input id="input" placeholder="What's on your mind, Shavor?…" autocomplete="off">
   <label for="fileInput" id="attachBtn" class="iconbtn" title="Send a photo or video">📎</label>
   <input type="file" id="fileInput" accept="image/*,video/*" class="filehidden">
@@ -128,6 +131,7 @@ const input = document.getElementById("input");
 const sendBtn = document.getElementById("send");
 const statusEl = document.getElementById("status");
 const xtalk = document.getElementById("xtalk");
+const funnelChk = document.getElementById("funnel");
 const speakBtn = document.getElementById("speakBtn");
 const micBtn = document.getElementById("micBtn");
 let ws = null, pending = {};
@@ -263,6 +267,7 @@ function connect(){
   ws.onmessage = (ev) => {
     const m = JSON.parse(ev.data);
     if(m.type==="history"){ log.innerHTML=""; (m.messages||[]).forEach(x=>{
+        if(x.hidden) return;  // funnel takes stay backstage — Ace synthesizes them
         if(x.from==="shavor") addMsg("me", x.text, null, x.ts, x.attachment);
         else addMsg(x.from, x.text, x.round, x.ts); }); }
     else if(m.type==="user"){ addMsg("me", m.text, null, m.ts, m.attachment); }
@@ -276,7 +281,8 @@ function connect(){
 function send(){
   const text = input.value.trim();
   if(!text || !ws || ws.readyState!==1) return;
-  ws.send(JSON.stringify({type:"user", text, crosstalk: xtalk.checked}));
+  ws.send(JSON.stringify({type:"user", text, crosstalk: xtalk.checked,
+                         funnel: funnelChk.checked}));
   input.value = "";
 }
 
@@ -306,6 +312,7 @@ fileInput.onchange = async () => {
     const caption = input.value.trim();
     ws.send(JSON.stringify({type:"user", text: caption,
                             crosstalk: xtalk.checked,
+                            funnel: funnelChk.checked,
                             attachment:{url:d.url, kind:d.kind, name:d.name}}));
     input.value = "";
   } catch(e) {
