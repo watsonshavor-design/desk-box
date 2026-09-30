@@ -276,13 +276,16 @@ button { cursor: pointer; }
   bottom: calc(var(--nav-h) + var(--kb));
 }
 .composer input[type="text"] {
-  flex: 1;
+  flex: 1 1 auto;
+  min-width: 0;
+  width: 0;
   min-height: 48px;
   border: 0;
   border-radius: var(--radius-control);
   background: var(--surface-1);
   padding: 0 14px;
 }
+#attachBtn, #micBtn { width: 48px; padding: 0; flex: 0 0 48px; }
 .filehidden {
   position: absolute;
   width: 1px;

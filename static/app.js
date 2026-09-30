@@ -402,7 +402,7 @@
       '<input id="input" type="text" autocomplete="off" placeholder="Ask the desk" value="' + esc(state.draft) + '" aria-label="Message">' +
       '<label id="attachBtn" class="iconbtn" for="fileInput" title="Send a photo or video" aria-label="Send a photo or video">＋</label>' +
       '<input id="fileInput" class="filehidden" type="file" accept="image/*,video/*">' +
-      '<button id="micBtn" class="iconbtn" type="button" data-action="mic" aria-label="Dictate">Mic</button>' +
+      '<button id="micBtn" class="iconbtn" type="button" data-action="mic" aria-label="Dictate">🎤</button>' +
       '<button id="send" type="submit"' + (state.connected ? "" : " disabled") + ">Send</button></form>";
   }
 
