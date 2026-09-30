@@ -599,7 +599,7 @@
             <aside class="card bluetooth-panel">
               <h3>Bluetooth</h3>
               <p>A quick control for the native Android app’s nearby audio devices.</p>
-              <div class="bluetooth-control"><div><strong id="bluetoothState">Bluetooth off</strong><span>Phone setting not connected in this prototype</span></div><button class="switch" id="bluetoothSwitch" role="switch" aria-checked="false" aria-label="Preview Bluetooth on or off"></button></div>
+              <div class="bluetooth-control"><div><strong id="bluetoothState">Bluetooth off</strong><span>Uses the phone’s Bluetooth setting. This page does not switch it.</span></div><button class="switch" id="bluetoothSwitch" role="switch" aria-checked="false" aria-label="Preview Bluetooth on or off"></button></div>
               <div class="bluetooth-note">The production Android build needs a native permission bridge to read or change Bluetooth. This control demonstrates the intended placement without claiming to change the phone setting.</div>
             </aside>
           </div>
@@ -713,7 +713,7 @@
       });
 
       var details = {
-        voice: {k:'ANDROID TASK', t:'Finish and merge PR #2', p:'Review and test the native speaker and microphone work before it enters the main branch.', steps:['Mark PR #2 ready for review.','Confirm RECORD_AUDIO permission and denial handling.','Test speech-to-text lands in the composer before sending.','Test text-to-speech persona pitch and rate.','Push fixes, then squash merge into main.']},
+        voice: {k:'CHAT', t:'One answer', p:'Ask in Chat.', steps:['Open Chat.','Send the question.']},
         pipeline: {k:'RELEASE TASK', t:'Add APK delivery workflow', p:'Create the missing build path so merged Android changes reach Shavor’s phone.', steps:['Add a GitHub Actions workflow for pushes to main.','Set up the Android JDK and Gradle cache.','Run the debug assemble task.','Upload the APK as a named build artifact.','Verify the downloaded APK installs and launches.']},
         handoff: {k:'CURSOR HANDOFF', t:'Apply the redesign to production', p:'Use this prototype as the visual and interaction specification for the real Android shell and room UI.', steps:['Implement Today, Chat, Tasks, and Briefing destinations.','Keep One Answer enabled by default.','Add context receipts and confidence fields to backstage takes.','Attach tasks and decisions to their source conversation.','Preserve current native media, mic, and speaker capabilities.']},
         media: {k:'VERIFY ON DEVICE', t:'Photo and video support', p:'The code is merged; the fresh APK must prove camera, gallery, and video work on the actual phone.', steps:['Take and attach a new photo.','Choose an existing gallery image.','Attach and preview a video.','Confirm large-file progress and failure states.']},
