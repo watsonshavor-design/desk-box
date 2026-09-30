@@ -19,3 +19,11 @@
 - Never share your DESK_TOKEN or API keys with anyone.
 - Watch spend in the xAI console once a week; Gemini is cheap.
 - The room logs sessions to desk-log.jsonl for the Night Desk relay.
+
+## Optional: Moomoo top-gainers (OpenAPI)
+In Railway Variables for the desk-box service also set:
+- `MOOMOO_APP_KEY` = AppKey id from https://open.moomoo.com/dashboard
+- `MOOMOO_RSA_PRIVATE_KEY` = matching Ed25519/RSA private key PEM
+  (use `\n` for newlines in the Railway UI). AppKey alone is not enough —
+  Traditional API Key auth signs every request with the private key.
+Webull gainers keep working without these. Combined merges both when Moomoo is ok.

@@ -1,4 +1,4 @@
-"""Top-gainers feeds for Desk Box (Webull + Moomoo/OpenD).
+"""Top-gainers feeds for Desk Box (Webull + Moomoo OpenAPI).
 
 Honest live fetch only — never invents prices. On failure returns empty
 items with a clear status/message.
@@ -9,13 +9,13 @@ Webull (works from Railway, no API key):
   Unofficial but stable public ranking endpoint used widely in the industry
   (same path as webull_unofficial / quotes-gw). regionId=6 = US.
 
-Moomoo (OpenD quote gateway):
-  Uses moomoo OpenQuoteContext.get_top_movers_rank(market=US) when OpenD is
-  reachable at MOOMOO_OPEND_HOST:MOOMOO_OPEND_PORT (defaults 127.0.0.1:11111,
-  same as Finance Tracker / Night Desk on the shared box).
-  OpenD binds to localhost on the desk box, so Railway cannot reach it —
-  Moomoo soft-fails with status=not_connected and a clear reason unless an
-  OpenD gateway (or tunnel) is pointed at via those env vars. No new secrets.
+Moomoo (preferred: gateway-free OpenAPI at webapi.moomoo.com):
+  Traditional API Key auth — X-Api-Key = MOOMOO_APP_KEY, request signed with
+  Ed25519 or RSA-SHA256 private key from MOOMOO_RSA_PRIVATE_KEY (or
+  MOOMOO_PRIVATE_KEY). Soft-fails with status=not_connected if the AppKey is
+  set but the private key is missing. Falls back to classic OpenD
+  get_top_movers_rank when OpenAPI creds are absent and OpenD is reachable
+  at MOOMOO_OPEND_HOST:MOOMOO_OPEND_PORT.
 """
 from __future__ import annotations
 
@@ -29,6 +29,19 @@ from typing import Any
 import httpx
 
 log = logging.getLogger("desk-box.gainers")
+
+# Moomoo OpenAPI (gateway-free REST) — https://webapi.moomoo.com
+MOOMOO_WEBAPI = "https://webapi.moomoo.com"
+MOOMOO_STOCK_SCREEN_PATH = "/api/v1.0/quote/stock-screen"
+# Stock-screen enums (from moomoo/futu stock_screen_const)
+_SCR_FIELD_MARKET = 1
+_SCR_MARKET_US = 2
+_PROP_PRICE = 2201            # SimpleProperty.PRICE
+_PROP_CHANGE_RATE = 2206      # SimpleProperty.PRICE_CHANGE_RATE (% points)
+_PROP_AVG_VOLUME = 3104       # CumulativeProperty.AVG_VOLUME
+_SORT_DESC = 2
+# PRICE response ival is typically *1000
+_PRICE_MULT = 1000.0
 
 CACHE_TTL_SEC = 120
 WEBULL_URL = (
@@ -192,7 +205,382 @@ async def fetch_webull() -> dict[str, Any]:
     }
 
 
-def _fetch_moomoo_sync() -> dict[str, Any]:
+def _env_nonempty(*names: str) -> str:
+    for n in names:
+        v = os.environ.get(n)
+        if v is not None and str(v).strip():
+            return str(v).strip()
+    return ""
+
+
+def _looks_like_pem(value: str) -> bool:
+    u = value.upper()
+    return (
+        "BEGIN PRIVATE KEY" in u
+        or "BEGIN RSA PRIVATE KEY" in u
+        or "BEGIN OPENSSH PRIVATE KEY" in u
+        or "BEGIN ED25519 PRIVATE KEY" in u
+    )
+
+
+def _moomoo_creds() -> dict[str, str]:
+    """Detect AppKey vs PEM without logging secret values."""
+    raw_key = _env_nonempty("MOOMOO_APP_KEY")
+    pem = _env_nonempty(
+        "MOOMOO_RSA_PRIVATE_KEY",
+        "MOOMOO_PRIVATE_KEY",
+        "MOOMOO_ED25519_PRIVATE_KEY",
+    )
+    secret = _env_nonempty("MOOMOO_APP_SECRET")
+    app_key = ""
+    private_pem = pem
+
+    if raw_key and _looks_like_pem(raw_key):
+        # User stored the PEM in MOOMOO_APP_KEY — treat as private key;
+        # look for a separate AppKey id.
+        private_pem = private_pem or raw_key
+        app_key = _env_nonempty("MOOMOO_APP_KEY_ID", "MOOMOO_APPID", "MOOMOO_CLIENT_ID")
+    elif raw_key:
+        app_key = raw_key
+
+    if not private_pem and secret and _looks_like_pem(secret):
+        private_pem = secret
+
+    return {
+        "app_key": app_key,
+        "private_pem": private_pem,
+        "app_key_len": str(len(app_key)),
+        "private_pem_len": str(len(private_pem)),
+    }
+
+
+def _sign_moomoo_request(
+    *,
+    private_pem: str,
+    timestamp_ms: str,
+    method: str,
+    path: str,
+    query_string: str,
+    body: bytes,
+) -> str:
+    """Sign per open.moomoo.com Getting Started (Ed25519 or RSA-SHA256)."""
+    import base64
+    import hashlib
+
+    if body:
+        body_part = hashlib.sha256(body).hexdigest()
+    else:
+        body_part = ""
+    signing = (
+        f"{timestamp_ms}\n{method.upper()}\n{path}\n{query_string}\n{body_part}"
+    )
+    signing_bytes = signing.encode("utf-8")
+
+    from cryptography.hazmat.primitives import hashes, serialization
+    from cryptography.hazmat.primitives.asymmetric import ed25519, padding, rsa
+    from cryptography.hazmat.primitives.serialization import load_pem_private_key
+
+    # Accept PEM or OpenSSH private key bytes.
+    key_bytes = private_pem.encode("utf-8") if isinstance(private_pem, str) else private_pem
+    # Normalize escaped newlines from env/Railway.
+    if b"\\n" in key_bytes and b"-----BEGIN" in key_bytes:
+        key_bytes = key_bytes.replace(b"\\n", b"\n")
+    try:
+        key = load_pem_private_key(key_bytes, password=None)
+    except Exception:
+        # OpenSSH format
+        from cryptography.hazmat.primitives.serialization import (
+            load_ssh_private_key,
+        )
+        key = load_ssh_private_key(key_bytes, password=None)
+
+    if isinstance(key, ed25519.Ed25519PrivateKey):
+        sig = key.sign(signing_bytes)
+    elif isinstance(key, rsa.RSAPrivateKey):
+        sig = key.sign(signing_bytes, padding.PKCS1v15(), hashes.SHA256())
+    else:
+        raise TypeError(f"unsupported private key type: {type(key).__name__}")
+    return base64.b64encode(sig).decode("ascii")
+
+
+def _parse_screen_result_value(result_obj: dict[str, Any], *, prop_id: int) -> float | None:
+    """Extract a float from a stock-screen results[] wrapper."""
+    if not isinstance(result_obj, dict):
+        return None
+    # Prefer typed wrappers from REST
+    for wrap_key in (
+        "simple_property_result",
+        "cumulative_property_result",
+        "basic_property_result",
+    ):
+        wrap = result_obj.get(wrap_key)
+        if isinstance(wrap, dict):
+            result_obj = wrap
+            break
+
+    res = result_obj.get("res") if isinstance(result_obj.get("res"), dict) else {}
+    # dval is already float when present (OpenD-style / some REST)
+    for candidate in (
+        result_obj.get("dval"),
+        res.get("dval"),
+        result_obj.get("value"),
+        res.get("sval"),
+        result_obj.get("sval"),
+        res.get("ival"),
+        result_obj.get("ival"),
+    ):
+        n = _num(candidate)
+        if n is not None:
+            # PRICE ival is typically multiplied by 1000 on REST
+            if prop_id == _PROP_PRICE and abs(n) >= 10000:
+                return n / _PRICE_MULT
+            # CHANGE_RATE sometimes arrives as micro-percent (15000 -> 15.0)
+            if prop_id == _PROP_CHANGE_RATE and abs(n) >= 1000:
+                return n / _PRICE_MULT
+            return n
+    return None
+
+
+def _fetch_moomoo_openapi() -> dict[str, Any] | None:
+    """Try gateway-free Moomoo OpenAPI. Returns None to fall through to OpenD."""
+    creds = _moomoo_creds()
+    app_key = creds["app_key"]
+    private_pem = creds["private_pem"]
+
+    if not app_key and not private_pem:
+        return None  # no OpenAPI creds — try OpenD
+
+    if app_key and not private_pem:
+        return {
+            "items": [],
+            "status": "not_connected",
+            "message": (
+                "Moomoo OpenAPI AppKey is set but the signing private key is "
+                "missing"
+            ),
+            "reason": (
+                "MOOMOO_APP_KEY is present "
+                f"(len={creds['app_key_len']}) but Moomoo Traditional API Key "
+                "auth also requires the Ed25519/RSA private key that matches "
+                "the public key uploaded at https://open.moomoo.com/dashboard. "
+                "Set MOOMOO_RSA_PRIVATE_KEY (PEM, including BEGIN/END lines; "
+                " Railway: use \\n for newlines) on the desk-box service. "
+                "Optional alias: MOOMOO_PRIVATE_KEY."
+            ),
+            "updated_at": _now_iso(),
+            "endpoint": f"{MOOMOO_WEBAPI}{MOOMOO_STOCK_SCREEN_PATH}",
+            "auth": "openapi_appkey_missing_private_key",
+        }
+
+    if private_pem and not app_key:
+        return {
+            "items": [],
+            "status": "not_connected",
+            "message": "Moomoo private key is set but AppKey id is missing",
+            "reason": (
+                "Found a PEM private key but no AppKey id. Set MOOMOO_APP_KEY "
+                "to the AppKey from https://open.moomoo.com/dashboard "
+                "(or MOOMOO_APP_KEY_ID if the PEM is stored in MOOMOO_APP_KEY)."
+            ),
+            "updated_at": _now_iso(),
+            "endpoint": f"{MOOMOO_WEBAPI}{MOOMOO_STOCK_SCREEN_PATH}",
+            "auth": "openapi_private_key_missing_appkey",
+        }
+
+    # US top gainers via stock-screen sorted by PRICE_CHANGE_RATE DESC
+    body_obj = {
+        "limit": 50,
+        "screen_queries": [
+            {
+                "simple_field_query": {
+                    "simple_field": _SCR_FIELD_MARKET,
+                    "screen_value_list": [_SCR_MARKET_US],
+                }
+            },
+            # Prefer names that actually moved today
+            {
+                "simple_property_query": {
+                    "property": {"name": _PROP_CHANGE_RATE},
+                    "filterMin": {"value": 0.01, "includes": True},
+                }
+            },
+        ],
+        "retrieve_queries": [
+            {"simple_property": {"name": _PROP_PRICE}},
+            {"simple_property": {"name": _PROP_CHANGE_RATE}},
+            {"cumulative_property": {"name": _PROP_AVG_VOLUME, "days": 1}},
+        ],
+        "sort": {
+            "direction": _SORT_DESC,
+            "simple_property": {"name": _PROP_CHANGE_RATE},
+        },
+    }
+    import json as _json
+    import secrets as _secrets
+
+    body = _json.dumps(body_obj, separators=(",", ":")).encode("utf-8")
+    path = MOOMOO_STOCK_SCREEN_PATH
+    method = "POST"
+    query_string = ""
+    timestamp_ms = str(int(time.time() * 1000))
+    nonce = _secrets.token_hex(16)
+
+    try:
+        signature = _sign_moomoo_request(
+            private_pem=private_pem,
+            timestamp_ms=timestamp_ms,
+            method=method,
+            path=path,
+            query_string=query_string,
+            body=body,
+        )
+    except Exception as e:
+        log.warning("moomoo openapi sign failed: %s", type(e).__name__)
+        return {
+            "items": [],
+            "status": "not_connected",
+            "message": "Moomoo OpenAPI private key could not be loaded/signed",
+            "reason": (
+                f"Failed to load/sign with MOOMOO_RSA_PRIVATE_KEY "
+                f"({type(e).__name__}). Expect PEM Ed25519 or RSA private key "
+                "matching the public key uploaded for this AppKey."
+            ),
+            "updated_at": _now_iso(),
+            "endpoint": f"{MOOMOO_WEBAPI}{path}",
+            "auth": "openapi_sign_error",
+        }
+
+    headers = {
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+        "X-Api-Key": app_key,
+        "X-Timestamp": timestamp_ms,
+        "X-Nonce": nonce,
+        "Authorization": signature,
+        "User-Agent": "desk-box/1.0",
+    }
+
+    try:
+        with httpx.Client(timeout=25.0) as client:
+            r = client.post(
+                f"{MOOMOO_WEBAPI}{path}",
+                content=body,
+                headers=headers,
+            )
+            # Do not log response body if it might echo auth errors with keys
+            if r.status_code >= 400:
+                # Keep message short; never include Authorization/AppKey
+                snippet = (r.text or "")[:180].replace(app_key, "***")
+                return {
+                    "items": [],
+                    "status": "error",
+                    "message": f"Moomoo OpenAPI HTTP {r.status_code}",
+                    "reason": snippet or r.reason_phrase,
+                    "updated_at": _now_iso(),
+                    "endpoint": f"{MOOMOO_WEBAPI}{path}",
+                    "auth": "openapi_http_error",
+                }
+            payload = r.json()
+    except Exception as e:
+        log.warning("moomoo openapi fetch failed: %s", type(e).__name__)
+        return {
+            "items": [],
+            "status": "error",
+            "message": f"Moomoo OpenAPI request failed: {type(e).__name__}",
+            "reason": str(e)[:240],
+            "updated_at": _now_iso(),
+            "endpoint": f"{MOOMOO_WEBAPI}{path}",
+            "auth": "openapi_request_error",
+        }
+
+    ret_code = payload.get("ret_code")
+    if ret_code not in (0, "0", None):
+        return {
+            "items": [],
+            "status": "error",
+            "message": f"Moomoo OpenAPI ret_code={ret_code}",
+            "reason": str(payload.get("ret_msg") or payload.get("error") or "")[:240],
+            "updated_at": _now_iso(),
+            "endpoint": f"{MOOMOO_WEBAPI}{path}",
+            "auth": "openapi_ret_error",
+        }
+
+    data = payload.get("data") or {}
+    raw_items = data.get("items") or payload.get("items") or []
+    items: list[dict[str, Any]] = []
+    for entry in raw_items:
+        if not isinstance(entry, dict):
+            continue
+        code = str(entry.get("code") or "")
+        # US.AAPL -> AAPL
+        symbol = code.split(".", 1)[-1] if code else ""
+        if not symbol:
+            continue
+        results = entry.get("results") or []
+        price = None
+        change_pct = None
+        volume = None
+        # retrieve order: price, change_rate, avg_volume
+        if len(results) > 0:
+            price = _parse_screen_result_value(results[0], prop_id=_PROP_PRICE)
+        if len(results) > 1:
+            change_pct = _parse_screen_result_value(
+                results[1], prop_id=_PROP_CHANGE_RATE
+            )
+        if len(results) > 2:
+            volume = _parse_screen_result_value(
+                results[2], prop_id=_PROP_AVG_VOLUME
+            )
+        # Fallback: scan results for property ids
+        if price is None or change_pct is None:
+            for res in results:
+                wrap = res
+                for k in (
+                    "simple_property_result",
+                    "cumulative_property_result",
+                ):
+                    if isinstance(res.get(k), dict):
+                        wrap = res[k]
+                        break
+                prop = (wrap.get("property") or {}) if isinstance(wrap, dict) else {}
+                name = prop.get("name")
+                if name == _PROP_PRICE and price is None:
+                    price = _parse_screen_result_value(wrap, prop_id=_PROP_PRICE)
+                elif name == _PROP_CHANGE_RATE and change_pct is None:
+                    change_pct = _parse_screen_result_value(
+                        wrap, prop_id=_PROP_CHANGE_RATE
+                    )
+                elif name == _PROP_AVG_VOLUME and volume is None:
+                    volume = _parse_screen_result_value(
+                        wrap, prop_id=_PROP_AVG_VOLUME
+                    )
+        name = entry.get("name") or entry.get("sc_name") or entry.get("tc_name")
+        items.append(
+            _row(
+                symbol=symbol.strip().upper(),
+                name=(str(name) if name else None),
+                last=price,
+                change_pct=change_pct,
+                volume=volume,
+                source="moomoo",
+            )
+        )
+
+    return {
+        "items": items,
+        "status": "ok" if items else "empty",
+        "message": (
+            f"Moomoo US top gainers via OpenAPI ({len(items)} names)"
+            if items
+            else "Moomoo OpenAPI returned no gainers right now"
+        ),
+        "updated_at": _now_iso(),
+        "endpoint": f"{MOOMOO_WEBAPI}{path}",
+        "auth": "openapi_appkey",
+    }
+
+
+def _fetch_moomoo_opend_sync() -> dict[str, Any]:
     """Blocking OpenD call — run in a thread. Soft-fails cleanly."""
     host = os.environ.get("MOOMOO_OPEND_HOST") or os.environ.get(
         "FUTU_OPEND_HOST", "127.0.0.1"
@@ -207,10 +595,9 @@ def _fetch_moomoo_sync() -> dict[str, Any]:
 
     reason_unreachable = (
         f"OpenD not reachable at {host}:{port}. "
-        "Moomoo quotes need the OpenD gateway (or a tunnel) reachable from "
-        "this host — on Railway that usually means pointing "
-        "MOOMOO_OPEND_HOST/PORT at a reachable OpenD, or an API key gateway. "
-        "Local desk box OpenD binds 127.0.0.1:11111 and is not exposed."
+        "Prefer Moomoo OpenAPI (MOOMOO_APP_KEY + MOOMOO_RSA_PRIVATE_KEY) on "
+        "Railway. Classic OpenD needs MOOMOO_OPEND_HOST/PORT pointed at a "
+        "reachable gateway — local desk-box OpenD binds 127.0.0.1:11111."
     )
 
     # Fast TCP probe so we don't hang waiting for the SDK on Railway.
@@ -226,6 +613,7 @@ def _fetch_moomoo_sync() -> dict[str, Any]:
             "reason": f"{reason_unreachable} ({e})",
             "updated_at": _now_iso(),
             "opend": f"{host}:{port}",
+            "auth": "opend",
         }
 
     try:
@@ -244,6 +632,7 @@ def _fetch_moomoo_sync() -> dict[str, Any]:
                 ),
                 "updated_at": _now_iso(),
                 "opend": f"{host}:{port}",
+                "auth": "opend",
             }
 
     ctx = None
@@ -262,6 +651,7 @@ def _fetch_moomoo_sync() -> dict[str, Any]:
                 "reason": str(data),
                 "updated_at": _now_iso(),
                 "opend": f"{host}:{port}",
+                "auth": "opend",
             }
         _all_count, df = data
         items: list[dict[str, Any]] = []
@@ -292,6 +682,7 @@ def _fetch_moomoo_sync() -> dict[str, Any]:
             ),
             "updated_at": _now_iso(),
             "opend": f"{host}:{port}",
+            "auth": "opend",
         }
     except Exception as e:
         log.warning("moomoo gainers fetch failed: %s", e)
@@ -302,6 +693,7 @@ def _fetch_moomoo_sync() -> dict[str, Any]:
             "reason": f"{reason_unreachable} Detail: {e}",
             "updated_at": _now_iso(),
             "opend": f"{host}:{port}",
+            "auth": "opend",
         }
     finally:
         if ctx is not None:
@@ -309,6 +701,14 @@ def _fetch_moomoo_sync() -> dict[str, Any]:
                 ctx.close()
             except Exception:
                 pass
+
+
+def _fetch_moomoo_sync() -> dict[str, Any]:
+    """Prefer OpenAPI AppKey path; fall back to OpenD when no OpenAPI creds."""
+    openapi = _fetch_moomoo_openapi()
+    if openapi is not None:
+        return openapi
+    return _fetch_moomoo_opend_sync()
 
 
 async def fetch_moomoo() -> dict[str, Any]:
@@ -442,6 +842,8 @@ def _merge(webull: dict[str, Any], moomoo: dict[str, Any]) -> dict[str, Any]:
                 "reason": moomoo.get("reason"),
                 "count": len(moomoo.get("items") or []),
                 "opend": moomoo.get("opend"),
+                "endpoint": moomoo.get("endpoint"),
+                "auth": moomoo.get("auth"),
             },
         },
     }
@@ -470,6 +872,6 @@ async def get_gainers(source: str = "combined") -> dict[str, Any]:
         "updated_at": data.get("updated_at") or _now_iso(),
         "status": data.get("status") or "not_connected",
         "message": data.get("message") or f"{src} feed not connected",
-        **{k: data[k] for k in ("reason", "endpoint", "opend", "sources")
+        **{k: data[k] for k in ("reason", "endpoint", "opend", "auth", "sources")
            if k in data},
     }

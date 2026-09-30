@@ -372,9 +372,10 @@ async def desk(token: str = ""):
 
 @app.get("/api/gainers")
 async def gainers(token: str = "", source: str = "combined"):
-    """Live top-gainers. Webull via public ranking API; Moomoo via OpenD
-    when reachable. Cache ~2 minutes. Never invents prices — failures
-    return empty items with an honest status/message."""
+    """Live top-gainers. Webull via public ranking API; Moomoo via OpenAPI
+    (MOOMOO_APP_KEY + MOOMOO_RSA_PRIVATE_KEY) or OpenD fallback. Cache ~2
+    minutes. Never invents prices — failures return empty items with an
+    honest status/message."""
     if token != DESK_TOKEN:
         return JSONResponse({"error": "bad token"}, status_code=403)
     payload = await gainers_mod.get_gainers(source)
