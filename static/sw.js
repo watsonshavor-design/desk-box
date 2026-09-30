@@ -1,12 +1,22 @@
-// Minimal service worker so Chrome treats Desk as installable.
-const CACHE = 'desk-shell-v1';
-self.addEventListener('install', (e) => {
-  e.waitUntil(caches.open(CACHE).then((c) => c.addAll(['/static/manifest.webmanifest'])));
+// Network-first shell. The HTML document is never cached; versioned assets
+// can be fetched again when /api/v2/version changes.
+const CACHE = "desk-shell-v15";
+self.addEventListener("install", (event) => {
   self.skipWaiting();
+  event.waitUntil(caches.open(CACHE));
 });
-self.addEventListener('activate', (e) => { e.waitUntil(self.clients.claim()); });
-self.addEventListener('fetch', (e) => {
-  // network-first for API/WS; cache-fallback only for same-origin GETs that fail
-  if (e.request.method !== 'GET') return;
-  e.respondWith(fetch(e.request).catch(() => caches.match(e.request)));
+self.addEventListener("activate", (event) => {
+  event.waitUntil((async () => {
+    const keys = await caches.keys();
+    await Promise.all(keys.filter((key) => key !== CACHE).map((key) => caches.delete(key)));
+    await self.clients.claim();
+  })());
+});
+self.addEventListener("fetch", (event) => {
+  if (event.request.method !== "GET") return;
+  if (event.request.mode === "navigate") {
+    event.respondWith(fetch(event.request));
+    return;
+  }
+  event.respondWith(fetch(event.request).catch(() => caches.match(event.request)));
 });
