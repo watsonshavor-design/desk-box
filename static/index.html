@@ -407,6 +407,10 @@
   
     .filehidden { position:absolute; width:1px; height:1px; opacity:0; pointer-events:none; }
     #log { overflow-y:auto; max-height:52vh; }
+    .movers-list { display:grid; gap:0; }
+    .mover-row { display:grid; grid-template-columns:48px minmax(0,1.2fr) minmax(0,.8fr) minmax(0,.8fr); gap:8px; padding:10px 4px; border-bottom:1px solid var(--line); font-size:13px; font-weight:600; }
+    .mover-row span:first-child { color:var(--muted); font:500 12px "IBM Plex Mono", monospace; }
+    #refreshGainers { padding:7px 10px; font-size:11px; }
     #log .msg { max-width:92%; padding:10px 12px; border-radius:16px; line-height:1.45; font-size:14px; }
     #log .msg.me { margin-left:auto; background:var(--accent-soft); }
     #log .msg.grok, #log .msg.gemini, #log .msg.ace { background:var(--surface-2); border:1px solid var(--line); }
@@ -511,17 +515,20 @@
             <div class="movers-head">
               <div><h2>Top gainers</h2><p id="feedSubtitle">Combined broker ranking · regular and extended hours</p></div>
               <div class="source-tabs" aria-label="Gainer feed source">
-                <button class="source-tab active" data-source="combined">Combined</button>
-                <button class="source-tab" data-source="moomoo">Moomoo</button>
-                <button class="source-tab" data-source="webull">Webull</button>
+                <button class="source-tab active" data-source="combined" type="button">Combined</button>
+                <button class="source-tab" data-source="moomoo" type="button">Moomoo</button>
+                <button class="source-tab" data-source="webull" type="button">Webull</button>
+                <button class="ghost-btn" id="refreshGainers" type="button" aria-label="Refresh gainers">Refresh</button>
               </div>
             </div>
             <div class="movers-columns" aria-hidden="true"><span>RANK</span><span>SYMBOL</span><span>LAST</span><span>CHANGE</span></div>
-            <div class="feed-empty">
+            <div class="movers-list" id="moversList" hidden></div>
+            <div class="feed-empty" id="feedEmpty">
               <div class="feed-empty-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 18 9 13l3 3 7-9"/><path d="M14 7h5v5"/></svg></div>
               <h3 id="feedEmptyTitle">Connect a market-data feed</h3>
               <p id="feedEmptyText">No feed is connected, so this list is empty on purpose.</p>
               <span class="feed-status"><i></i><span id="feedStatusText">Combined feed not connected</span></span>
+              <p class="feed-updated" id="feedUpdated" style="margin:10px 0 0;color:var(--muted);font-size:11px">Not refreshed yet</p>
             </div>
           </article>
           <aside class="card integration-card">
@@ -606,8 +613,8 @@
             <aside class="card bluetooth-panel">
               <h3>Bluetooth</h3>
               <p>Nearby audio follows the phone’s system setting. The desk does not flip the adapter from this page.</p>
-              <div class="bluetooth-control"><div><strong id="bluetoothState">Demo preview — does not change your phone’s Bluetooth</strong><span id="bluetoothHint">Browser demo only. On Android this shows the real adapter state.</span></div><button type="button" class="ghost-btn" id="bluetoothAction" aria-label="Bluetooth demo preview">Demo</button></div>
-              <div class="bluetooth-note" id="bluetoothNote">Demo preview — does not change your phone’s Bluetooth. The Android app can show live state and open system Bluetooth settings.</div>
+              <div class="bluetooth-control"><div><strong id="bluetoothState">Checking Bluetooth…</strong><span id="bluetoothHint">On Android this shows the real adapter state and opens system settings.</span></div><button type="button" class="ghost-btn" id="bluetoothAction" aria-label="Open system Bluetooth settings">Settings</button></div>
+              <div class="bluetooth-note" id="bluetoothNote">The desk never flips Bluetooth itself. Tap Settings in the phone app to open the system panel.</div>
             </aside>
           </div>
         </div>
@@ -661,29 +668,110 @@
       document.querySelectorAll('[data-go]').forEach(function(btn){ btn.addEventListener('click', function(){ switchView(btn.dataset.go); }); });
 
       var feedCopy = {
-        combined: ['Combined broker ranking · regular and extended hours', 'Combined feed not connected', 'The production app can merge Moomoo and Webull movers, remove duplicate symbols, and preserve each venue’s session data.'],
+        combined: ['Combined broker ranking · regular and extended hours', 'Combined feed not connected', 'No feed is connected, so this list is empty on purpose.'],
         moomoo: ['Moomoo ranking · regular and extended hours', 'Moomoo feed not connected', 'A production broker or market-data connection is required before Moomoo-ranked movers can appear here.'],
         webull: ['Webull ranking · regular and extended hours', 'Webull feed not connected', 'A production broker or market-data connection is required before Webull-ranked movers can appear here.']
       };
+      var activeGainerSource = 'combined';
+      function fmtFeedTime(iso){
+        try {
+          var d = iso ? new Date(iso) : new Date();
+          return d.toLocaleString(undefined, {month:'short', day:'numeric', hour:'numeric', minute:'2-digit'});
+        } catch (e) { return 'just now'; }
+      }
+      function renderGainers(data){
+        var list = document.getElementById('moversList');
+        var empty = document.getElementById('feedEmpty');
+        var items = (data && data.items) || [];
+        var updated = document.getElementById('feedUpdated');
+        if (updated) updated.textContent = 'Last checked ' + fmtFeedTime(data && data.updated_at);
+        if (data && data.message) document.getElementById('feedStatusText').textContent = data.message;
+        if (!items.length) {
+          if (list) { list.innerHTML = ''; list.hidden = true; }
+          if (empty) empty.hidden = false;
+          return;
+        }
+        if (empty) empty.hidden = true;
+        if (!list) return;
+        list.hidden = false;
+        list.innerHTML = items.map(function(row, i){
+          var sym = String(row.symbol || row.ticker || '—');
+          var last = row.last != null ? row.last : (row.price != null ? row.price : '—');
+          var chg = row.change != null ? row.change : (row.change_pct != null ? row.change_pct + '%' : '—');
+          return '<div class="mover-row"><span>'+(i+1)+'</span><span>'+sym+'</span><span>'+last+'</span><span>'+chg+'</span></div>';
+        }).join('');
+      }
+      function loadGainers(source, announce){
+        activeGainerSource = source || activeGainerSource || 'combined';
+        var copy = feedCopy[activeGainerSource] || feedCopy.combined;
+        document.getElementById('feedSubtitle').textContent = copy[0];
+        document.getElementById('feedStatusText').textContent = 'Checking feed…';
+        document.getElementById('feedEmptyText').textContent = copy[2];
+        var tok = '';
+        try { tok = new URLSearchParams(location.search).get('token') || localStorage.getItem('desk_token') || ''; } catch (e) {}
+        var url = '/api/gainers?source=' + encodeURIComponent(activeGainerSource) + '&token=' + encodeURIComponent(tok);
+        return fetch(url).then(function(r){ return r.json(); }).then(function(data){
+          if (!data || data.error) throw new Error((data && data.error) || 'gainers failed');
+          renderGainers(data);
+          if (announce) showToast((data.label || activeGainerSource) + ' checked');
+          return data;
+        }).catch(function(err){
+          renderGainers({items:[], updated_at: new Date().toISOString(), message: copy[1]});
+          document.getElementById('feedEmptyText').textContent = 'Could not reach the gainers endpoint. Try Refresh again.';
+          if (announce) showToast('Gainers refresh failed');
+        });
+      }
       document.querySelectorAll('.source-tab').forEach(function(tab){ tab.addEventListener('click', function(){
         document.querySelectorAll('.source-tab').forEach(function(t){ t.classList.remove('active'); });
         tab.classList.add('active');
-        var copy = feedCopy[tab.dataset.source];
-        document.getElementById('feedSubtitle').textContent = copy[0];
-        document.getElementById('feedStatusText').textContent = copy[1];
-        document.getElementById('feedEmptyText').textContent = copy[2];
+        loadGainers(tab.dataset.source, true);
       }); });
+      var refreshGainers = document.getElementById('refreshGainers');
+      if (refreshGainers) refreshGainers.addEventListener('click', function(){ loadGainers(activeGainerSource, true); });
+      loadGainers('combined', false);
 
       document.querySelectorAll('.source-toggle').forEach(function(btn){ btn.addEventListener('click', function(){
-        var box = btn.nextElementSibling; box.classList.toggle('open'); btn.textContent = box.classList.contains('open') ? 'Hide private source takes' : 'Show private source takes';
+        var box = btn.nextElementSibling; if(!box) return;
+        box.classList.toggle('open'); btn.textContent = box.classList.contains('open') ? 'Hide private source takes' : 'Show private source takes';
       }); });
-      document.getElementById('showSourcesToday').addEventListener('click', function(){ switchView('chat'); setTimeout(function(){ document.querySelector('.source-toggle').click(); }, 80); });
+      document.getElementById('showSourcesToday').addEventListener('click', function(){
+        var box = document.getElementById('funnel');
+        if (box && box.checked) {
+          box.checked = false;
+          document.querySelectorAll('.mode-switch').forEach(function(s){ s.setAttribute('aria-checked', 'false'); });
+          var note = document.getElementById('desk');
+          if (note) note.textContent = 'One answer is off';
+        }
+        switchView('chat');
+        var railChip = document.querySelector('.filter-chip[data-filter="rail"]');
+        if (railChip) railChip.click();
+        showToast('Roundtable on — Rail and Anchor replies will show in Chat');
+      });
 
+      function applyMessageFilter(filter){
+        window.__deskMsgFilter = filter || 'all';
+        document.querySelectorAll('#log .msg').forEach(function(m){
+          var who = m.dataset.speaker || '';
+          if (!who) {
+            if (m.classList.contains('me')) who = 'me';
+            else if (m.classList.contains('ace')) who = 'ace';
+            else if (m.classList.contains('grok')) who = 'rail';
+            else if (m.classList.contains('gemini')) who = 'anchor';
+          }
+          var show = true;
+          if (filter === 'ace') show = (who === 'ace' || who === 'me');
+          else if (filter === 'rail') show = (who === 'rail' || who === 'grok' || who === 'me');
+          else if (filter === 'anchor') show = (who === 'anchor' || who === 'gemini' || who === 'me');
+          m.style.display = show ? '' : 'none';
+        });
+      }
       document.querySelectorAll('.filter-chip').forEach(function(chip){ chip.addEventListener('click', function(){
-        document.querySelectorAll('.filter-chip').forEach(function(c){ c.classList.remove('active'); }); chip.classList.add('active');
-        var filter = chip.dataset.filter;
-        document.querySelectorAll('.message').forEach(function(m){ m.style.display = (filter === 'all' || m.dataset.speaker === filter || m.dataset.speaker === 'me' || ((filter === 'rail' || filter === 'anchor') && m.dataset.speaker === 'ace')) ? 'grid' : 'none'; });
-        if(filter === 'rail' || filter === 'anchor') { document.querySelector('.source-takes').classList.add('open'); document.querySelector('.source-toggle').textContent = 'Hide private source takes'; showToast('Private take revealed inside Ace’s answer'); }
+        document.querySelectorAll('.filter-chip').forEach(function(c){ c.classList.remove('active'); });
+        chip.classList.add('active');
+        applyMessageFilter(chip.dataset.filter || 'all');
+        if (chip.dataset.filter === 'rail') showToast('Showing Rail messages');
+        else if (chip.dataset.filter === 'anchor') showToast('Showing Anchor messages');
+        else if (chip.dataset.filter === 'ace') showToast('Showing Ace messages');
       }); });
 
       function selectBrief(name){
@@ -691,18 +779,33 @@
         document.querySelectorAll('.brief-page').forEach(function(p){ p.classList.toggle('active', p.id === name + 'Brief'); });
       }
       document.querySelectorAll('.brief-tab').forEach(function(tab){ tab.addEventListener('click', function(){ selectBrief(tab.dataset.brief); }); });
+      var APP_WEB = {youtube:'https://www.youtube.com/', facebook:'https://www.facebook.com/', snapchat:'https://www.snapchat.com/'};
+      function launchConnectedApp(name){
+        var id = String(name || '').trim().toLowerCase();
+        var label = name || id;
+        if (window.DeskNative && typeof DeskNative.openConnectedApp === 'function') {
+          try { DeskNative.openConnectedApp(id); showToast('Opening ' + label); return; }
+          catch (e) {}
+        }
+        if (APP_WEB[id]) {
+          window.open(APP_WEB[id], '_blank', 'noopener');
+          showToast('Opened ' + label);
+          return;
+        }
+        showToast(label + ' is not available here');
+      }
       function openApps(name){
         switchView('briefing'); selectBrief('apps');
         if(name){
-          document.getElementById('sourceSummary').innerHTML = '<strong>'+name+' selected.</strong> Account content is not connected in this app; the native app will open this source in the unified feed after authorization.';
-          showToast(name + ' feed selected');
+          document.getElementById('sourceSummary').innerHTML = '<strong>'+name+' selected.</strong> Tap Open to launch the phone app (or its web home in the browser). Feed posts are not imported into Chat yet.';
+          launchConnectedApp(name);
         }
       }
       document.getElementById('manageAppsBtn').addEventListener('click', function(){ openApps(); });
       document.querySelectorAll('[data-app-shortcut]').forEach(function(btn){ btn.addEventListener('click', function(){ openApps(btn.dataset.appShortcut); }); });
       document.querySelectorAll('.app-preview').forEach(function(btn){ btn.addEventListener('click', function(){
-        document.getElementById('sourceSummary').innerHTML = '<strong>'+btn.dataset.app+' selected.</strong> Account content is not connected in this app; the native app will open this source in the unified feed after authorization.';
-        showToast(btn.dataset.app + ' feed preview opened');
+        document.getElementById('sourceSummary').innerHTML = '<strong>'+btn.dataset.app+' selected.</strong> Launching the phone app when available. Feed posts are not imported into Chat yet.';
+        launchConnectedApp(btn.dataset.app);
       }); });
       (function setupBluetooth(){
         var stateEl = document.getElementById('bluetoothState');
@@ -718,6 +821,7 @@
           else stateEl.textContent = 'Bluetooth status unknown';
           hintEl.textContent = 'Phone adapter state. Opens system Bluetooth settings — the desk does not flip it.';
           btn.textContent = 'Settings';
+          btn.disabled = false;
           btn.setAttribute('aria-label', 'Open system Bluetooth settings');
         }
         if (window.DeskNative && typeof DeskNative.bluetoothState === 'function') {
@@ -731,13 +835,13 @@
             } catch (e) { showToast('Open Bluetooth in phone Settings'); }
           });
         } else {
-          stateEl.textContent = 'Demo preview — does not change your phone’s Bluetooth';
-          hintEl.textContent = 'Browser demo only. This control does not turn Bluetooth on or off.';
-          btn.textContent = 'Demo';
-          btn.setAttribute('aria-label', 'Demo preview — does not change your phone’s Bluetooth');
-          note.textContent = 'Demo preview — does not change your phone’s Bluetooth. On Android this panel shows the real adapter and opens system settings.';
+          stateEl.textContent = 'Bluetooth available in the phone app';
+          hintEl.textContent = 'This browser cannot read the phone adapter. Open Shavors Advisors on Android for live state.';
+          btn.textContent = 'Phone app';
+          btn.setAttribute('aria-label', 'Bluetooth requires the Android app');
+          note.textContent = 'In the Android app this panel shows live adapter state and opens system Bluetooth settings. The desk never flips the radio itself.';
           btn.addEventListener('click', function(){
-            showToast('Demo preview — does not change your phone’s Bluetooth');
+            showToast('Open Shavors Advisors on Android for live Bluetooth state');
           });
         }
       })();
@@ -837,6 +941,8 @@ function attHtml(a){
 function addMsg(who, text, round, ts, att){
   const div = document.createElement("div");
   div.className = "msg " + who;
+  const speaker = who === "grok" ? "rail" : who === "gemini" ? "anchor" : who;
+  div.dataset.speaker = speaker;
   const nm = NAMES[who] || [who.toUpperCase(), null];
   const av = nm[1] ? `<img class="av" src="${nm[1]}" alt="">` : "";
   div.innerHTML = `<div class="who ${who}">${av}<span class="who-name">${nm[0]}</span>` +
@@ -982,7 +1088,9 @@ fileInput.onchange = async () => {
     addMsg("me", "⚠ not connected — try again in a moment", null, null);
     return;
   }
-  attachBtn.textContent = "⏳";
+  const attachHtml = attachBtn.innerHTML;
+  attachBtn.setAttribute("aria-busy", "true");
+  attachBtn.style.opacity = "0.55";
   try {
     const fd = new FormData();
     fd.append("file", f);
@@ -999,7 +1107,9 @@ fileInput.onchange = async () => {
   } catch(e) {
     addMsg("me", "⚠ couldn't send that file: "+e.message, null, null);
   }
-  attachBtn.textContent = "📎";
+  attachBtn.innerHTML = attachHtml;
+  attachBtn.removeAttribute("aria-busy");
+  attachBtn.style.opacity = "";
 };
 
 function greeting(){
@@ -1020,6 +1130,16 @@ addMsg = function(who, text, round, ts, att){
     showAnswer(line.slice(0, 140), text);
     var label = document.getElementById("answerLabel");
     if(label) label.textContent = "DESK ANSWER · LIVE";
+  }
+  var active = document.querySelector('.filter-chip.active');
+  var filter = (active && active.dataset.filter) || window.__deskMsgFilter || 'all';
+  if (filter && filter !== 'all') {
+    var whoKey = div.dataset.speaker || who;
+    var show = true;
+    if (filter === 'ace') show = (whoKey === 'ace' || whoKey === 'me');
+    else if (filter === 'rail') show = (whoKey === 'rail' || whoKey === 'grok' || whoKey === 'me');
+    else if (filter === 'anchor') show = (whoKey === 'anchor' || whoKey === 'gemini' || whoKey === 'me');
+    div.style.display = show ? '' : 'none';
   }
   return div;
 };

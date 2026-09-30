@@ -368,6 +368,32 @@ async def desk(token: str = ""):
     return JSONResponse(DESK_CONTEXT)
 
 
+@app.get("/api/gainers")
+async def gainers(token: str = "", source: str = "combined"):
+    """Honest movers endpoint. No broker feed is wired yet — returns an
+    empty list with a freshness timestamp so the UI can refresh for real
+    without inventing prices."""
+    if token != DESK_TOKEN:
+        return JSONResponse({"error": "bad token"}, status_code=403)
+    src = (source or "combined").strip().lower()
+    if src not in ("combined", "moomoo", "webull"):
+        src = "combined"
+    labels = {
+        "combined": "Combined broker ranking",
+        "moomoo": "Moomoo ranking",
+        "webull": "Webull ranking",
+    }
+    return JSONResponse({
+        "ok": True,
+        "source": src,
+        "label": labels[src],
+        "items": [],
+        "updated_at": now_iso(),
+        "status": "not_connected",
+        "message": f"{src[0].upper() + src[1:]} feed not connected",
+    })
+
+
 # --- Ace bridge -----------------------------------------------------------
 # There is no API for Muse, so Ace joins the room through these two
 # endpoints instead:
