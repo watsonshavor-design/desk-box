@@ -7,9 +7,9 @@
   <meta name="theme-color" content="#171022" />
   <link rel="icon" href="data:," />
   <title>Shavor's Desk</title>
-  <link rel="manifest" href="/static/manifest.json">
+  <link rel="manifest" href="/static/manifest.webmanifest">
   <link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
-  <link rel="icon" type="image/png" sizes="32x32" href="/static/favicon-32.png">
+  <link rel="icon" type="image/png" sizes="192x192" href="/static/icon-192.png">
   <style>
     @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500&display=swap');
 
@@ -284,7 +284,7 @@
     .feed-empty-icon { width:48px; height:48px; margin:0 auto 15px; border-radius:15px; background:var(--accent-soft); color:var(--accent-strong); display:grid; place-items:center; }
     .feed-empty-icon svg { width:23px; height:23px; }
     .feed-empty h3 { margin:0 0 7px; font-size:16px; }
-    .feed-empty p { max-width:480px; margin:0 auto; color:var(--muted); font-size:12px; line-height:1.55; }
+    .feed-empty p { max-width:480px; margin:0 auto; color:var(--muted); font-size:12px; line-height:1.55; overflow-wrap:anywhere; word-break:break-word; }
     .feed-status { display:inline-flex; align-items:center; gap:7px; margin-top:16px; padding:7px 10px; border-radius:9px; background:var(--surface-2); color:var(--muted); font-size:10px; font-weight:700; }
     .feed-status i { width:7px; height:7px; border-radius:50%; background:var(--warm); }
     .integration-card { border-radius:var(--radius-lg); padding:20px; }
@@ -315,17 +315,17 @@
     .source-copy span { display:block; margin-top:3px; color:var(--muted); font-size:10px; line-height:1.4; }
     .source-action { display:grid; justify-items:end; gap:5px; }
     .source-action small { color:var(--muted); font-size:9px; font-weight:700; }
-    .source-summary { margin-top:15px; padding:12px 14px; border:1px dashed var(--line); border-radius:12px; color:var(--muted); font-size:11px; line-height:1.5; }
+    .source-summary { margin-top:15px; padding:12px 14px; border:1px dashed var(--line); border-radius:12px; color:var(--muted); font-size:11px; line-height:1.5; overflow-wrap:anywhere; word-break:break-word; }
     .source-summary strong { color:var(--ink); }
     .bluetooth-control { display:flex; align-items:center; justify-content:space-between; gap:14px; padding:14px 0; border-top:1px solid var(--line); border-bottom:1px solid var(--line); }
     .bluetooth-control strong { display:block; font-size:13px; }
     .bluetooth-control span { display:block; margin-top:3px; color:var(--muted); font-size:10px; }
     .bluetooth-note { margin-top:15px; padding:12px; border-radius:12px; background:var(--accent-soft); color:var(--accent-strong); font-size:10px; line-height:1.5; font-weight:600; }
 
-    .drawer-backdrop { position:fixed; inset:0; background:rgba(4,10,8,.54); opacity:0; pointer-events:none; transition:.2s; z-index:40; }
-    .drawer-backdrop.open { opacity:1; pointer-events:auto; }
-    .drawer { position:fixed; top:0; right:0; bottom:0; width:min(430px,100%); background:var(--surface); transform:translateX(105%); transition:.25s ease; z-index:41; padding:24px; overflow:auto; box-shadow:-20px 0 70px rgba(0,0,0,.25); }
-    .drawer.open { transform:none; }
+    .drawer-backdrop { position:fixed; inset:0; background:rgba(4,10,8,.54); opacity:0; pointer-events:none; transition:.2s; z-index:40; display:none; }
+    .drawer-backdrop.open { display:block; opacity:1; pointer-events:auto; }
+    .drawer { position:fixed; top:0; right:0; bottom:0; width:min(430px,100%); background:var(--surface); transform:translateX(105%); transition:.25s ease; z-index:41; padding:24px; overflow:auto; box-shadow:-20px 0 70px rgba(0,0,0,.25); display:none; }
+    .drawer.open { display:block; transform:none; }
     .drawer-head { display:flex; justify-content:space-between; gap:20px; align-items:center; margin-bottom:28px; }
     .drawer-head span { color:var(--muted); font-size:11px; font-weight:700; }
     .drawer h2 { font-size:25px; letter-spacing:-.03em; margin:0 0 12px; }
@@ -410,6 +410,14 @@
     #log .msg { max-width:92%; padding:10px 12px; border-radius:16px; line-height:1.45; font-size:14px; }
     #log .msg.me { margin-left:auto; background:var(--accent-soft); }
     #log .msg.grok, #log .msg.gemini, #log .msg.ace { background:var(--surface-2); border:1px solid var(--line); }
+    #log .who { display:flex; align-items:center; flex-wrap:wrap; gap:6px 8px; font-size:11px; font-weight:700; letter-spacing:.06em; margin-bottom:4px; }
+    #log .who img.av { width:18px; height:18px; border-radius:50%; flex:0 0 auto; }
+    #log .who-name { font-weight:700; letter-spacing:.06em; }
+    #log .who.grok { color:var(--warm); }
+    #log .who.gemini { color:var(--blue); }
+    #log .who.me, #log .who.ace { color:var(--accent-strong); }
+    #log .round { display:inline-block; font-size:10px; color:var(--muted); font-weight:400; letter-spacing:0; padding:2px 7px; border-radius:999px; background:var(--surface-3); }
+    #log .ts { font-size:10px; color:var(--muted); font-weight:400; letter-spacing:0; }
     #status.on { color:var(--accent-strong); }
     #input { width:100%; border:0; background:transparent; color:inherit; font:inherit; outline:none; }
     #send:disabled { opacity:.4; }
@@ -449,7 +457,6 @@
         <div><p class="eyebrow" id="viewEyebrow">Tuesday evening · Sep 29</p><h1 id="viewTitle">Good evening, Shavor</h1></div>
         <div class="top-actions">
           <span class="proto-badge"><span class="live-dot"></span>Live room</span>
-          <button class="icon-btn" id="infoBtn" aria-label="Open redesign notes"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7.5h.01"/></svg></button>
         </div>
       </header>
 
@@ -598,9 +605,9 @@
             </article>
             <aside class="card bluetooth-panel">
               <h3>Bluetooth</h3>
-              <p>A quick control for the native Android app’s nearby audio devices.</p>
-              <div class="bluetooth-control"><div><strong id="bluetoothState">Bluetooth off</strong><span>Uses the phone’s Bluetooth setting. This page does not switch it.</span></div><button class="switch" id="bluetoothSwitch" role="switch" aria-checked="false" aria-label="Preview Bluetooth on or off"></button></div>
-              <div class="bluetooth-note">The production Android build needs a native permission bridge to read or change Bluetooth. This control demonstrates the intended placement without claiming to change the phone setting.</div>
+              <p>Nearby audio follows the phone’s system setting. The desk does not flip the adapter from this page.</p>
+              <div class="bluetooth-control"><div><strong id="bluetoothState">Demo preview — does not change your phone’s Bluetooth</strong><span id="bluetoothHint">Browser demo only. On Android this shows the real adapter state.</span></div><button type="button" class="ghost-btn" id="bluetoothAction" aria-label="Bluetooth demo preview">Demo</button></div>
+              <div class="bluetooth-note" id="bluetoothNote">Demo preview — does not change your phone’s Bluetooth. The Android app can show live state and open system Bluetooth settings.</div>
             </aside>
           </div>
         </div>
@@ -616,7 +623,7 @@
     <button class="nav-btn" data-view="briefing"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 19.5V5a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v14.5"/><path d="M8 7h8M8 11h8M8 15h5M2 19h20"/></svg><span>Briefing</span></button>
   </nav>
 
-  <div class="drawer-backdrop" id="backdrop"></div>
+  <div class="drawer-backdrop" id="backdrop" aria-hidden="true"></div>
   <aside class="drawer" id="drawer" aria-hidden="true" aria-label="Details panel">
     <div class="drawer-head"><span id="drawerKicker">TASK DETAIL</span><button class="icon-btn" id="closeDrawer" aria-label="Close details"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m6 6 12 12M18 6 6 18"/></svg></button></div>
     <h2 id="drawerTitle">Desk</h2>
@@ -667,14 +674,6 @@
         document.getElementById('feedEmptyText').textContent = copy[2];
       }); });
 
-      document.querySelectorAll('.mode-switch').forEach(function(sw){
-        sw.addEventListener('click', function(){
-          var next = sw.getAttribute('aria-checked') !== 'true';
-          document.querySelectorAll('.mode-switch').forEach(function(other){ other.setAttribute('aria-checked', String(next)); });
-          showToast(next ? 'One-answer routing on' : 'Roundtable preview on');
-        });
-      });
-
       document.querySelectorAll('.source-toggle').forEach(function(btn){ btn.addEventListener('click', function(){
         var box = btn.nextElementSibling; box.classList.toggle('open'); btn.textContent = box.classList.contains('open') ? 'Hide private source takes' : 'Show private source takes';
       }); });
@@ -705,36 +704,67 @@
         document.getElementById('sourceSummary').innerHTML = '<strong>'+btn.dataset.app+' selected.</strong> Account content is not connected in this app; the native app will open this source in the unified feed after authorization.';
         showToast(btn.dataset.app + ' feed preview opened');
       }); });
-      document.getElementById('bluetoothSwitch').addEventListener('click', function(){
-        var next = this.getAttribute('aria-checked') !== 'true';
-        this.setAttribute('aria-checked', String(next));
-        document.getElementById('bluetoothState').textContent = next ? 'Bluetooth on · preview' : 'Bluetooth off';
-        showToast(next ? 'Bluetooth control preview on' : 'Bluetooth control preview off');
-      });
+      (function setupBluetooth(){
+        var stateEl = document.getElementById('bluetoothState');
+        var hintEl = document.getElementById('bluetoothHint');
+        var btn = document.getElementById('bluetoothAction');
+        var note = document.getElementById('bluetoothNote');
+        function applyBluetooth(raw){
+          var info = {state:'unknown'};
+          try { info = typeof raw === 'string' ? JSON.parse(raw || '{}') : (raw || info); } catch (e) {}
+          var st = info.state || 'unknown';
+          if (st === 'on') stateEl.textContent = 'Bluetooth on';
+          else if (st === 'off') stateEl.textContent = 'Bluetooth off';
+          else stateEl.textContent = 'Bluetooth status unknown';
+          hintEl.textContent = 'Phone adapter state. Opens system Bluetooth settings — the desk does not flip it.';
+          btn.textContent = 'Settings';
+          btn.setAttribute('aria-label', 'Open system Bluetooth settings');
+        }
+        if (window.DeskNative && typeof DeskNative.bluetoothState === 'function') {
+          try { applyBluetooth(DeskNative.bluetoothState()); } catch (e) { applyBluetooth(null); }
+          window.deskBluetoothUpdated = function(raw){ applyBluetooth(raw); };
+          note.textContent = 'Live adapter state from the Android app. Tap Settings to open the phone’s Bluetooth panel.';
+          btn.addEventListener('click', function(){
+            try {
+              if (DeskNative.openBluetoothSettings) DeskNative.openBluetoothSettings();
+              else showToast('Open Bluetooth in phone Settings');
+            } catch (e) { showToast('Open Bluetooth in phone Settings'); }
+          });
+        } else {
+          stateEl.textContent = 'Demo preview — does not change your phone’s Bluetooth';
+          hintEl.textContent = 'Browser demo only. This control does not turn Bluetooth on or off.';
+          btn.textContent = 'Demo';
+          btn.setAttribute('aria-label', 'Demo preview — does not change your phone’s Bluetooth');
+          note.textContent = 'Demo preview — does not change your phone’s Bluetooth. On Android this panel shows the real adapter and opens system settings.';
+          btn.addEventListener('click', function(){
+            showToast('Demo preview — does not change your phone’s Bluetooth');
+          });
+        }
+      })();
 
-      var details = {
-        voice: {k:'CHAT', t:'One answer', p:'Ask in Chat.', steps:['Open Chat.','Send the question.']},
-        pipeline: {k:'RELEASE TASK', t:'Add APK delivery workflow', p:'Create the missing build path so merged Android changes reach Shavor’s phone.', steps:['Add a GitHub Actions workflow for pushes to main.','Set up the Android JDK and Gradle cache.','Run the debug assemble task.','Upload the APK as a named build artifact.','Verify the downloaded APK installs and launches.']},
-        handoff: {k:'CURSOR HANDOFF', t:'Apply the redesign to production', p:'The home screen is already this page. Chat is where the team answers.', steps:['Implement Today, Chat, Tasks, and Briefing destinations.','Keep One Answer enabled by default.','Add context receipts and confidence fields to backstage takes.','Attach tasks and decisions to their source conversation.','Preserve current native media, mic, and speaker capabilities.']},
-        media: {k:'VERIFY ON DEVICE', t:'Photo and video support', p:'The code is merged; the fresh APK must prove camera, gallery, and video work on the actual phone.', steps:['Take and attach a new photo.','Choose an existing gallery image.','Attach and preview a video.','Confirm large-file progress and failure states.']},
-        funnel: {k:'ROOM VERIFICATION', t:'One-answer funnel', p:'Confirm the new routing eliminates duplicate replies without hiding important disagreement.', steps:['Confirm the control is visible and enabled by default.','Send one question and expect one Ace reply.','Verify private Rail and Anchor takes are linked to that question.','Reveal sources on demand and confirm no second-round loop.']}
-      };
       var drawer = document.getElementById('drawer'), backdrop = document.getElementById('backdrop');
       function checkIcon(){ return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="m8 12 2.5 2.5L16 9"/></svg>'; }
       function openDrawer(data){
         document.getElementById('drawerKicker').textContent = data.k; document.getElementById('drawerTitle').textContent = data.t; document.getElementById('drawerText').textContent = data.p;
-        document.getElementById('drawerBody').innerHTML = '<div class="drawer-section"><h3>Acceptance steps</h3>' + data.steps.map(function(s){ return '<div class="check-line">'+checkIcon()+'<span>'+s+'</span></div>'; }).join('') + '</div>';
+        document.getElementById('drawerBody').innerHTML = '<div class="drawer-section"><h3>How it works</h3>' + data.steps.map(function(s){ return '<div class="check-line">'+checkIcon()+'<span>'+s+'</span></div>'; }).join('') + '</div>';
+        drawer.style.display = 'block';
+        backdrop.style.display = 'block';
         drawer.classList.add('open'); backdrop.classList.add('open'); drawer.setAttribute('aria-hidden','false');
+        backdrop.setAttribute('aria-hidden','false');
       }
-      function closeDrawer(){ drawer.classList.remove('open'); backdrop.classList.remove('open'); drawer.setAttribute('aria-hidden','true'); }
-      document.querySelectorAll('[data-task]').forEach(function(btn){ btn.addEventListener('click', function(){ openDrawer(details[btn.dataset.task]); }); });
+      function closeDrawer(){
+        drawer.classList.remove('open'); backdrop.classList.remove('open');
+        drawer.setAttribute('aria-hidden','true');
+        backdrop.setAttribute('aria-hidden','true');
+        drawer.style.display = 'none';
+        backdrop.style.display = 'none';
+      }
       document.getElementById('closeDrawer').addEventListener('click', closeDrawer); backdrop.addEventListener('click', closeDrawer);
       document.addEventListener('keydown', function(e){ if(e.key === 'Escape') closeDrawer(); });
 
       var protocol = {k:'COMMUNICATION DESIGN', t:'A faster, more informative desk', p:'The strongest improvement is not adding more messages—it is structuring how context, disagreement, and decisions move between the three voices.', steps:['Classify every inbound message before fan-out.','Send one canonical context packet with IDs for rules, attachments, and prior decisions.','Require each private take to include confidence, evidence, and a change-of-mind condition.','Have Ace merge overlap, surface real disagreement, and return one owned next action.','Store decisions and tasks separately from raw room history; show their source links in context.','Add delivery receipts: queued, provider replied, synthesis posted, and user acknowledged.']};
       document.getElementById('protocolBtn').addEventListener('click', function(){ openDrawer(protocol); });
       document.getElementById('openProtocolFromBrief').addEventListener('click', function(){ openDrawer(protocol); });
-      document.getElementById('infoBtn').addEventListener('click', function(){ openDrawer({k:'REDESIGN NOTES',t:'What this layout changes',p:'The room becomes one part of a broader command center instead of carrying every job in one endless thread.',steps:['Today gives one glanceable answer, task progress, and system health.','Chat keeps the main dialogue clean while preserving private source takes.','Tasks turn decisions into owned work with acceptance steps.','Briefing separates market, system, and learning information.','Desktop uses a quiet rail; mobile uses a thumb-friendly bottom bar.']}); });
 
       document.querySelectorAll('.mode-switch').forEach(function(sw){
         sw.addEventListener('click', function(){
@@ -745,6 +775,7 @@
           document.querySelectorAll('.mode-switch').forEach(function(s){ s.setAttribute('aria-checked', on ? 'true' : 'false'); });
           var note = document.getElementById('desk');
           if(note) note.textContent = on ? 'One answer is on' : 'One answer is off';
+          showToast(on ? 'One-answer routing on' : 'Roundtable preview on');
         });
       });
     })();
@@ -808,7 +839,7 @@ function addMsg(who, text, round, ts, att){
   div.className = "msg " + who;
   const nm = NAMES[who] || [who.toUpperCase(), null];
   const av = nm[1] ? `<img class="av" src="${nm[1]}" alt="">` : "";
-  div.innerHTML = `<div class="who ${who}">${av}${nm[0]}` +
+  div.innerHTML = `<div class="who ${who}">${av}<span class="who-name">${nm[0]}</span>` +
     (round && round>1 ? `<span class="round">round ${round} · reacts</span>` : "") +
     `<span class="ts">${esc(fmtTs(ts))}</span>` +
     `</div><div>${esc(text)}${attHtml(att)}</div>`;
