@@ -355,7 +355,10 @@ async def on_startup():
 async def index(token: str = ""):
     if token != DESK_TOKEN:
         return JSONResponse({"error": "bad token"}, status_code=403)
-    return FileResponse(os.path.join(BASE_DIR, "static", "index.html"))
+    return FileResponse(
+        os.path.join(BASE_DIR, "static", "index.html"),
+        headers={"Cache-Control": "no-store"},
+    )
 
 
 @app.get("/api/desk")
