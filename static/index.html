@@ -460,7 +460,7 @@
             <h2 id="answerTitle">Ask in Chat. You get one answer back.</h2>
             <p id="answerBody">Rail and Anchor brief Ace privately. The latest answer lands here and in the conversation.</p>
             <div class="answer-meta"><span class="voice-pill warm"><i></i>Rail briefed</span><span class="voice-pill blue"><i></i>Anchor briefed</span><span class="voice-pill"><i></i>Ace synthesized</span></div>
-            <div class="card-actions"><button class="primary-btn" data-go="chat">Open conversation</button><button class="ghost-btn" id="showSourcesToday">See source takes</button></div>
+            <div class="card-actions"><button class="primary-btn" data-go="chat">Open conversation</button><button class="ghost-btn" id="showSourcesToday">Show the private takes</button></div>
           </article>
           <div class="stack">
             <article class="card mini-card">
@@ -480,7 +480,7 @@
                 <button class="app-launcher" data-app-shortcut="Facebook" aria-label="View Facebook feed integration"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M13.7 21v-8h2.7l.4-3.1h-3.1v-2c0-.9.3-1.5 1.6-1.5H17V3.6c-.3 0-1.3-.1-2.5-.1-2.5 0-4.2 1.5-4.2 4.3v2.1H7.5V13h2.8v8h3.4Z"/></svg><span>Facebook</span></button>
                 <button class="app-launcher" data-app-shortcut="Snapchat" aria-label="View Snapchat feed integration"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M12 3.4c-2.5 0-4.1 2-4.1 4.6 0 .5.1 1.1.1 1.6-.4.2-1 .1-1.4-.1-.5-.2-.9.6-.3 1 .6.4 1.3.5 1.7.8-.2.8-.9 2.2-2.8 3-.6.3-.4 1.1.2 1.2.7.1 1.1.4 1.3 1 .2.4.6.6 1 .5.9-.2 1.5.3 2.1.7.6.4 1.2.8 2.2.8s1.6-.4 2.2-.8c.6-.4 1.2-.9 2.1-.7.4.1.8-.1 1-.5.2-.6.6-.9 1.3-1 .6-.1.8-.9.2-1.2-1.9-.8-2.6-2.2-2.8-3 .4-.3 1.1-.4 1.7-.8.6-.4.2-1.2-.3-1-.4.2-1 .3-1.4.1 0-.5.1-1.1.1-1.6 0-2.6-1.6-4.6-4.1-4.6Z"/></svg><span>Snapchat</span></button>
               </div>
-              <p class="app-card-foot">Choose which sources can appear in your unified feed.</p>
+              <p class="app-card-foot">YouTube, Facebook, and Snapchat open from the phone app. Their posts are not in this feed yet.</p>
             </article>
             <article class="card mini-card system-card">
               <div class="card-head"><h3>System snapshot</h3><span class="section-label" id="snapshotWhen" style="margin:0">NOW</span></div>
@@ -498,7 +498,7 @@
       </section>
 
       <section class="view" id="marketView" aria-label="Top gainers">
-        <p class="page-intro">A dedicated market lane keeps fast movers out of the conversation until they pass your liquidity, catalyst, and risk filters.</p>
+        <p class="page-intro">Gainers stay out of Chat until you have a real feed. Nothing on this screen is a live price.</p>
         <div class="market-grid">
           <article class="card movers-card">
             <div class="movers-head">
@@ -513,7 +513,7 @@
             <div class="feed-empty">
               <div class="feed-empty-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 18 9 13l3 3 7-9"/><path d="M14 7h5v5"/></svg></div>
               <h3 id="feedEmptyTitle">Connect a market-data feed</h3>
-              <p id="feedEmptyText">This prototype does not invent live rankings. The production app can populate this list through a server-side market-data or broker connection.</p>
+              <p id="feedEmptyText">No feed is connected, so this list is empty on purpose.</p>
               <span class="feed-status"><i></i><span id="feedStatusText">Combined feed not connected</span></span>
             </div>
           </article>
@@ -579,7 +579,7 @@
           </div>
         </div>
         <div class="brief-page" id="systemBrief">
-          <div class="news-list"><article class="card news-item"><div class="news-date"><b>29</b><span>SEP</span></div><div><h3>Backend diagnostics passed</h3><p>Railway room, memory, and uploads were responding in the latest reported check.</p></div></article><article class="card news-item"><div class="news-date"><b>29</b><span>SEP</span></div><div><h3>APK pipeline is the release blocker</h3><p>The repository had no GitHub Actions workflow, so merged changes were not reaching a downloadable Android build.</p></div></article><article class="card news-item"><div class="news-date"><b>29</b><span>SEP</span></div><div><h3>Voice work awaits merge</h3><p>PR #2 includes native speaker and microphone work but still needs build testing and merge.</p></div></article></div>
+          <div class="news-list"><article class="card news-item"><div><h3>The room is this page</h3><p>Chat, voice, and photos are live. One answer is on, so you get a single reply.</p></div></article><article class="card news-item"><div><h3>The phone app opens this page</h3><p>You do not need a new install to see this layout.</p></div></article><article class="card news-item"><div><h3>Gainers are not connected</h3><p>That list stays empty until a real market feed is attached.</p></div></article></div>
         </div>
         <div class="brief-page" id="learningBrief">
           <div class="brief-grid"><article class="card brief-hero"><span class="stamp">PLAYBOOK NOTE</span><h2>Separate research, debate, decision, and execution.</h2><p>Each phase should produce a distinct artifact: source takes, a synthesized answer, an explicit owner, and a verification result. This keeps the desk fast without losing disagreement or evidence.</p><div class="card-actions"><button class="primary-btn" id="openProtocolFromBrief">Open protocol details</button></div></article><div class="insight-list"><article class="card insight"><strong>Confidence labels</strong><p>Each private take should report confidence and identify the single fact most likely to change it.</p></article><article class="card insight"><strong>Context receipts</strong><p>Show which attachments, prices, rules, and recent decisions were included in the prompt.</p></article><article class="card insight"><strong>Decision memory</strong><p>Save final decisions separately from chat history so old conversation cannot silently override them.</p></article></div></div>
@@ -619,8 +619,8 @@
   <div class="drawer-backdrop" id="backdrop"></div>
   <aside class="drawer" id="drawer" aria-hidden="true" aria-label="Details panel">
     <div class="drawer-head"><span id="drawerKicker">TASK DETAIL</span><button class="icon-btn" id="closeDrawer" aria-label="Close details"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m6 6 12 12M18 6 6 18"/></svg></button></div>
-    <h2 id="drawerTitle">Finish and merge PR #2</h2>
-    <p id="drawerText">Review and test the native voice work before it enters the main branch.</p>
+    <h2 id="drawerTitle">Desk</h2>
+    <p id="drawerText">Open a section to see what it does.</p>
     <div id="drawerBody"></div>
   </aside>
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
