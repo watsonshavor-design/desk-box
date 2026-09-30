@@ -6,7 +6,7 @@ gainers, and connected apps stay absent until a real source exists.
 import json
 import os
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
 
@@ -21,6 +21,12 @@ def read_version():
 
 def _denied():
     return JSONResponse({"error": "bad token"}, status_code=403)
+
+
+def _authed(desk, token, request: Request):
+    if token == desk.DESK_TOKEN:
+        return True
+    return desk.store.session_ok(request.cookies.get("desk_session"))
 
 
 def _provider(desk, env_name):
@@ -42,18 +48,18 @@ def _provider(desk, env_name):
 
 def register(app: FastAPI):
     @app.get("/api/v2/version")
-    async def version(token: str = ""):
+    async def version(request: Request, token: str = ""):
         import app as desk
-        if token != desk.DESK_TOKEN:
+        if not _authed(desk, token, request):
             return _denied()
         payload = read_version()
         payload["protocol"] = str(payload.get("protocol", "1"))
         return payload
 
     @app.get("/api/v2/health")
-    async def health(token: str = ""):
+    async def health(request: Request, token: str = ""):
         import app as desk
-        if token != desk.DESK_TOKEN:
+        if not _authed(desk, token, request):
             return _denied()
         return {
             "ok": True,
@@ -66,9 +72,9 @@ def register(app: FastAPI):
         }
 
     @app.get("/api/v2/dashboard")
-    async def dashboard(token: str = ""):
+    async def dashboard(request: Request, token: str = ""):
         import app as desk
-        if token != desk.DESK_TOKEN:
+        if not _authed(desk, token, request):
             return _denied()
         async with desk.history_lock:
             visible = [item for item in desk.history if not item.get("hidden")]
@@ -108,5 +114,5 @@ def register(app: FastAPI):
                 "updated_at": memory_at,
             },
             "recent": recent,
-            "decisions": [],
+            "decisions": desk.store.list_decisions()[:5],
         }

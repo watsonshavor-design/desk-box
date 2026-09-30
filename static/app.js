@@ -32,6 +32,7 @@
     contextOpen: false,
     menu: null,
     thinking: {},
+    requestState: "",
     speakOn: false,
     versionLabel: "",
     taskView: "today",
@@ -104,9 +105,20 @@
     if (route === "home" || route === "more") loadDashboard();
   }
 
-  function api(path) {
-    const join = path.indexOf("?") >= 0 ? "&" : "?";
-    return fetch(path + join + "token=" + encodeURIComponent(state.token), { cache: "no-store" });
+  function uuid() {
+    if (window.crypto && crypto.randomUUID) return crypto.randomUUID();
+    return "m-" + Date.now().toString(16) + "-" + Math.random().toString(16).slice(2);
+  }
+
+  function api(path, options) {
+    const opts = options || {};
+    opts.cache = "no-store";
+    opts.credentials = "include";
+    let url = path;
+    if (state.token) {
+      url += (path.indexOf("?") >= 0 ? "&" : "?") + "token=" + encodeURIComponent(state.token);
+    }
+    return fetch(url, opts);
   }
 
   async function loadDashboard() {
@@ -375,7 +387,7 @@
 
   function attachmentHtml(attachment) {
     if (!attachment || !attachment.url) return "";
-    const src = esc(attachment.url) + "?token=" + encodeURIComponent(state.token);
+    const src = esc(attachment.url) + (state.token ? ("?token=" + encodeURIComponent(state.token)) : "");
     if (attachment.kind === "video") {
       return '<video class="clip" src="' + src + '" controls playsinline></video>';
     }
@@ -383,12 +395,16 @@
   }
 
   function progressHtml() {
-    const active = Object.keys(state.thinking).some(function (key) {
-      const value = state.thinking[key];
-      return value === "thinking" || value === "reacting";
-    });
-    if (!active) return "";
+    const phase = state.requestState;
+    const active = phase === "accepted" || phase === "researching" || phase === "partner_ready" ||
+      phase === "synthesizing" || phase === "partial" || Object.keys(state.thinking).some(function (key) {
+        const value = state.thinking[key];
+        return value === "thinking" || value === "reacting";
+      });
+    if (!active || phase === "complete" || phase === "failed") return "";
     if (state.mode !== "panel") {
+      if (phase === "partial") return '<p class="progress">One partner is missing. Ace is synthesizing.</p>';
+      if (phase === "synthesizing") return '<p class="progress">Ace is synthesizing.</p>';
       return '<p class="progress">Rail and Anchor are reviewing; Ace is synthesizing.</p>';
     }
     const reacting = Object.keys(state.thinking).some(function (key) {
@@ -513,16 +529,24 @@
     }
   }
 
+  function sendPayload(extra) {
+    return Object.assign({
+      type: "user",
+      text: state.draft.trim(),
+      crosstalk: state.mode === "panel" && state.crosstalk,
+      funnel: state.mode !== "panel",
+      message_id: uuid(),
+      thread_id: "desk",
+      reply_to: state.replyTo || undefined,
+    }, extra || {});
+  }
+
   function send() {
     const text = state.draft.trim();
     if (!text || !ws || ws.readyState !== 1) return;
-    ws.send(JSON.stringify({
-      type: "user",
-      text: text,
-      crosstalk: state.mode === "panel" && state.crosstalk,
-      funnel: state.mode !== "panel",
-    }));
+    ws.send(JSON.stringify(sendPayload()));
     state.draft = "";
+    state.replyTo = null;
     const field = document.getElementById("input");
     if (field) field.value = "";
   }
@@ -538,16 +562,13 @@
     try {
       const body = new FormData();
       body.append("file", file);
-      const response = await fetch("/api/upload?token=" + encodeURIComponent(state.token), { method: "POST", body: body });
+      const uploadUrl = "/api/upload" + (state.token ? ("?token=" + encodeURIComponent(state.token)) : "");
+      const response = await fetch(uploadUrl, { method: "POST", body: body, credentials: "include" });
       const payload = await response.json();
       if (!payload.ok) throw new Error(payload.error || "upload failed");
-      ws.send(JSON.stringify({
-        type: "user",
-        text: state.draft.trim(),
-        crosstalk: state.mode === "panel" && state.crosstalk,
-        funnel: state.mode !== "panel",
+      ws.send(JSON.stringify(sendPayload({
         attachment: { url: payload.url, kind: payload.kind, name: payload.name },
-      }));
+      })));
       state.draft = "";
     } catch (error) {
       window.addMsg("me", "Couldn't send that file: " + error.message);
@@ -569,19 +590,29 @@
   window.deskSendAttachment = function (url, kind, name) {
     try {
       if (!ws || ws.readyState !== 1) return "offline";
-      ws.send(JSON.stringify({
-        type: "user",
-        text: state.draft.trim(),
-        crosstalk: state.mode === "panel" && state.crosstalk,
-        funnel: state.mode !== "panel",
+      ws.send(JSON.stringify(sendPayload({
         attachment: { url: url, kind: kind, name: name },
-      }));
+      })));
       state.draft = "";
       return "sent";
     } catch (error) {
       return "error:" + (error && error.message ? error.message : "send failed");
     }
   };
+
+  function rememberIncoming(message) {
+    const id = message.id || message.message_id;
+    if (id) {
+      for (let i = 0; i < state.messages.length; i++) {
+        const current = state.messages[i].id || state.messages[i].message_id;
+        if (current === id) {
+          state.messages[i] = Object.assign(state.messages[i], message);
+          return;
+        }
+      }
+    }
+    state.messages.push(message);
+  }
 
   function connect() {
     if (!state.token) return;
@@ -606,14 +637,22 @@
       if (message.type === "history") {
         state.messages = message.messages || [];
         state.thinking = {};
+        state.requestState = "";
         if (state.route === "desk") render();
         return;
+      } else if (message.type === "ack") {
+        state.requestState = message.state || "accepted";
+      } else if (message.type === "request_state") {
+        state.requestState = message.state || "";
+        if (message.state === "complete" || message.state === "failed") state.thinking = {};
       } else if (message.type === "user") {
-        state.messages.push({
+        rememberIncoming({
+          id: message.message_id,
           from: "shavor",
           text: message.text,
           ts: message.ts,
           attachment: message.attachment,
+          reply_to: message.reply_to,
         });
       } else if (message.type === "status") {
         state.thinking[message.provider] = message.state;
@@ -626,7 +665,8 @@
         }
       } else if (message.type === "reply") {
         state.thinking[message.provider] = "done";
-        state.messages.push({
+        rememberIncoming({
+          id: message.message_id,
           from: message.provider,
           text: message.text,
           ts: message.ts,
@@ -708,6 +748,9 @@
       actions: [
         ["copy-msg", "Copy", String(index)],
         ["share-msg", "Share", String(index)],
+        ["reply-msg", "Reply", String(index)],
+        ["pin-msg", "Pin", String(index)],
+        ["retry-msg", "Retry", String(index)],
         ["close-menu", "Close"],
       ],
     };
@@ -787,6 +830,13 @@
     else if (action === "brief-tab") { state.briefTab = arg; render(); }
     else if (action === "copy-msg") copyMessage(Number(arg));
     else if (action === "share-msg") shareMessage(Number(arg));
+    else if (action === "reply-msg") {
+      const message = state.messages[Number(arg)];
+      state.replyTo = message && (message.id || message.message_id) || null;
+      state.menu = null;
+      render();
+    } else if (action === "pin-msg") pinMessage(Number(arg));
+    else if (action === "retry-msg") retryMessage(Number(arg));
     else if (action === "open-app") go("more");
   }
 
@@ -800,8 +850,15 @@
       event.preventDefault();
       const value = document.getElementById("gtok").value.trim();
       if (!value) return;
-      try { localStorage.setItem("desk_token", value); } catch (e) {}
-      location.href = "/?token=" + encodeURIComponent(value);
+      fetch("/api/v2/session", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token: value }),
+      }).then(function (response) {
+        if (!response.ok) return;
+        location.href = location.pathname + "#/home";
+      });
     }
   });
   app.addEventListener("input", function (event) {
@@ -875,19 +932,68 @@
     apply();
   }
 
-  const params = new URLSearchParams(location.search);
-  let token = params.get("token") || "";
-  try {
-    if (token) localStorage.setItem("desk_token", token);
-    else token = localStorage.getItem("desk_token") || "";
-  } catch (e) {}
-  state.token = token;
+  async function pinMessage(index) {
+    const message = state.messages[index];
+    const id = message && (message.id || message.message_id);
+    state.menu = null;
+    if (!id) { render(); return; }
+    await api("/api/v2/messages/" + encodeURIComponent(id) + "/pin", { method: "POST" });
+    message.pinned = !message.pinned;
+    render();
+  }
+
+  async function retryMessage(index) {
+    const message = state.messages[index];
+    const id = message && (message.id || message.message_id);
+    state.menu = null;
+    render();
+    if (!id) return;
+    await api("/api/v2/messages/" + encodeURIComponent(id) + "/retry", { method: "POST" });
+  }
+
+  async function establish() {
+    const params = new URLSearchParams(location.search);
+    let token = params.get("token") || "";
+    try {
+      if (!token) token = localStorage.getItem("desk_token") || "";
+    } catch (e) {}
+    if (token) {
+      try {
+        const response = await fetch("/api/v2/session", {
+          method: "POST",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ token: token }),
+        });
+        if (response.ok) {
+          state.authed = true;
+          state.token = "";
+          try { localStorage.removeItem("desk_token"); } catch (e) {}
+          if (params.get("token")) history.replaceState({ route: state.route }, "", location.pathname + location.hash);
+          return;
+        }
+      } catch (e) {}
+      state.token = token;
+      state.authed = true;
+      return;
+    }
+    try {
+      const probe = await fetch("/api/v2/version", { credentials: "include", cache: "no-store" });
+      state.authed = probe.ok;
+    } catch (e) {
+      state.authed = false;
+    }
+  }
+
   state.route = routeFromHash();
   if (!location.hash) history.replaceState({ route: "home" }, "", "#/home");
   watchViewport();
-  render();
-  if (state.token) {
-    connect();
-    loadDashboard();
-  }
+  app.innerHTML = '<p class="banner">Loading the desk…</p>';
+  establish().then(function () {
+    render();
+    if (state.authed || state.token) {
+      connect();
+      loadDashboard();
+    }
+  });
 })();

@@ -33,6 +33,7 @@ from fastapi.staticfiles import StaticFiles
 from providers import PROVIDERS
 import providers as providers_mod
 import api_v2
+from store import Store
 
 
 # Shared room memory, maintained by Ace and pushed from the main chat.
@@ -67,6 +68,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 # there; otherwise everything lives next to the code (ephemeral on Railway).
 DATA_DIR = os.environ.get("DESK_DATA_DIR", BASE_DIR)
 LOG_PATH = os.path.join(DATA_DIR, "desk-log.jsonl")
+store = Store(os.path.join(DATA_DIR, "desk.sqlite"))
 MEMORY_PATH = os.path.join(DATA_DIR, "room-memory.md")
 HISTORY_KEEP = 2000   # in-memory messages per room (14-day window)
 HISTORY_SEND = 200    # messages sent to a newly connected UI
@@ -146,7 +148,8 @@ app.mount("/static", StaticFiles(directory=os.path.join(BASE_DIR, "static")),
 
 history = []          # list of dicts: {from, provider?, text, ts}
 history_lock = asyncio.Lock()
-msg_queue = asyncio.Queue()  # one message processed at a time
+thread_queues = {}
+provider_slots = None  # created on startup, inside the running loop
 
 
 def now_iso():
@@ -162,6 +165,8 @@ def append_log(entry):
 
 
 async def remember(entry):
+    if not store.insert_message(entry):
+        return False
     async with history_lock:
         history.append(entry)
         cutoff = retention_cutoff()
@@ -169,6 +174,7 @@ async def remember(entry):
         del history[:]
         history.extend(fresh[-HISTORY_KEEP:])
     append_log(entry)
+    return True
 
 
 def load_history():
@@ -248,30 +254,123 @@ FUNNEL_HEADER = (
     "He reads Ace's synthesis, never this text, so make it count.]\n\n")
 
 
+def _allowed(token="", cookie=""):
+    if token and token == DESK_TOKEN:
+        return True
+    return store.session_ok(cookie)
+
+
+async def emit_state(message_id, request_id, state, thread_id, mode):
+    if request_id:
+        store.set_request(request_id, message_id, thread_id, state, mode)
+    await room.broadcast({
+        "type": "request_state",
+        "message_id": message_id,
+        "request_id": request_id,
+        "thread_id": thread_id,
+        "state": state,
+    })
+
+
+def synthesize(question, takes):
+    """One accountable answer from the takes we actually have."""
+    order = ("grok", "gemini")
+    names = {"grok": "Rail", "gemini": "Anchor"}
+    heard = [name for name in order if takes.get(name) and not takes[name].get("error")]
+    missing = [name for name in order if name not in heard]
+    agreement = "missing" if missing or not heard else "agrees"
+    notes = []
+    for name in order:
+        if name in heard:
+            notes.append(f"{names[name]} contributed.")
+        else:
+            notes.append(f"{names[name]} didn't answer.")
+    answer = "I don't have a partner take to synthesize."
+    if heard:
+        answer = takes[heard[0]]["text"]
+    why = "\n".join(f"{names[name]}: {takes[name]['text'][:500]}" for name in heard)
+    return {
+        "answer": answer[:4000],
+        "why": why,
+        "action": [],
+        "risk": "",
+        "sources": [],
+        "agreement": agreement,
+        "desk_notes": " ".join(notes),
+    }
+
+
+async def finish_ace_job(job_id, result):
+    status = store.complete_job(job_id, result)
+    if status != "ok":
+        return status
+    job = store.get_job(job_id)
+    original = store.get_message(job["message_id"])
+    entry = {
+        "from": "ace",
+        "text": (result.get("answer") or "").strip()[:4000],
+        "ts": now_iso(),
+        "thread_id": job["thread_id"],
+        "funnel_answer": True,
+        "for_message_id": job["message_id"],
+        "for_ts": (original or {}).get("ts") or "",
+        "structured": result,
+        "agreement": result.get("agreement"),
+        "mode": "one_answer",
+        "request_id": (job.get("payload") or {}).get("request_id"),
+        "context_version": (job.get("payload") or {}).get("context_version"),
+    }
+    await remember(entry)
+    await room.broadcast({
+        "type": "reply",
+        "provider": "ace",
+        "round": 1,
+        "text": entry["text"],
+        "ts": entry["ts"],
+        "message_id": entry["id"],
+        "for_message_id": job["message_id"],
+        "thread_id": job["thread_id"],
+        "structured": result,
+        "agreement": result.get("agreement"),
+        "desk_notes": result.get("desk_notes") or "",
+    })
+    await emit_state(job["message_id"], entry.get("request_id"), "complete",
+                     job["thread_id"], "one_answer")
+    return "ok"
+
+
 async def fan_out(job):
     """Ask Grok and Gemini in parallel; optionally run one cross-talk round.
 
-    job is a dict: {text, crosstalk, image, funnel, for_ts}.
-    image is an optional (mime_type, base64) tuple — both partners can see
-    photos, so a chart screenshot gets two expert reads, not just pixels.
-    In funnel mode the takes are saved hidden (never broadcast) for Ace to
-    synthesize into one answer; a failing provider leaves a hidden
-    error placeholder so the synthesis never waits forever."""
+    job is a dict: {text, crosstalk, image, funnel, for_ts, message_id,
+    thread_id, request_id}. In funnel mode the takes are saved hidden for
+    Ace. A failing provider leaves a hidden error so synthesis can disclose
+    the missing voice instead of waiting forever."""
     text, crosstalk = job["text"], job["crosstalk"]
     image = job.get("image")
     funnel = job.get("funnel", False)
     for_ts = job.get("for_ts")
+    message_id = job.get("message_id") or ""
+    thread_id = job.get("thread_id") or "desk"
+    request_id = job.get("request_id") or ""
+    mode = "one_answer" if funnel else "panel"
     first = {}
+    takes = {}
+    if request_id:
+        await emit_state(message_id, request_id, "researching", thread_id, mode)
 
     async def one(name):
         try:
             await room.broadcast({"type": "status", "provider": name,
                                   "state": "thinking"})
             prompt = (FUNNEL_HEADER + text) if funnel else text
-            reply = await PROVIDERS[name](prompt, image=image)
+            async with provider_slots:
+                reply = await PROVIDERS[name](prompt, image=image)
             first[name] = reply
-            entry = {"from": name, "round": 1, "text": reply,
-                     "ts": now_iso()}
+            entry = {"from": name, "round": 1, "text": reply, "ts": now_iso(),
+                     "thread_id": thread_id, "for_message_id": message_id,
+                     "request_id": request_id, "context_version": job.get("context_version")}
+            takes[name] = {"text": reply, "error": False}
             if funnel:
                 entry["hidden"] = True
                 entry["funnel"] = True
@@ -280,21 +379,29 @@ async def fan_out(job):
                 await room.broadcast({"type": "status", "provider": name,
                                       "state": "done"})
             else:
+                await remember(entry)
                 await room.broadcast({"type": "reply", "provider": name,
                                       "round": 1, "text": reply,
-                                      "ts": entry["ts"]})
-                await remember(entry)
+                                      "ts": entry["ts"], "message_id": entry.get("id"),
+                                      "thread_id": thread_id,
+                                      "for_message_id": message_id})
+            if request_id:
+                await emit_state(message_id, request_id, "partner_ready", thread_id, mode)
         except Exception as e:  # one provider failing never blocks the other
             err = f"{name} failed: {e}"
             log.warning(err)
+            takes[name] = {"text": f"[{name} couldn't be reached — no take.]", "error": True}
             if funnel:
-                entry = {"from": name, "round": 1, "text":
-                         f"[{name} couldn't be reached — no take.]",
+                entry = {"from": name, "round": 1, "text": takes[name]["text"],
                          "ts": now_iso(), "hidden": True, "funnel": True,
-                         "for_ts": for_ts, "error": True}
+                         "for_ts": for_ts, "for_message_id": message_id,
+                         "thread_id": thread_id, "error": True,
+                         "request_id": request_id}
                 await remember(entry)
                 await room.broadcast({"type": "status", "provider": name,
                                       "state": "done"})
+                if request_id:
+                    await emit_state(message_id, request_id, "partial", thread_id, mode)
             else:
                 await room.broadcast({"type": "status", "provider": name,
                                       "state": "error", "detail": str(e)})
@@ -321,24 +428,67 @@ async def fan_out(job):
 
         await asyncio.gather(react("grok", "gemini"), react("gemini", "grok"))
 
-    await room.broadcast({"type": "done"})
+    if funnel and message_id:
+        if any(item.get("error") for item in takes.values()):
+            await emit_state(message_id, request_id, "partial", thread_id, mode)
+        await emit_state(message_id, request_id, "synthesizing", thread_id, mode)
+        payload = {
+            "question": text,
+            "takes": takes,
+            "request_id": request_id,
+            "context_version": store.context_version(),
+            "thread_id": thread_id,
+        }
+        job_row = store.create_job(message_id, thread_id, payload)
+        auto = (os.environ.get("MOCK_PROVIDERS") == "1"
+                and os.environ.get("ACE_AUTO", "1") != "0")
+        if auto and job_row.get("status") != "complete":
+            await finish_ace_job(job_row["id"], synthesize(text, takes))
+    elif request_id:
+        await emit_state(message_id, request_id, "complete", thread_id, mode)
+
+    await room.broadcast({"type": "done", "message_id": message_id, "thread_id": thread_id})
 
 
-async def worker():
+async def enqueue(job):
+    """Keep order inside one thread. Other threads are not blocked on it."""
+    thread_id = job.get("thread_id") or "desk"
+    job["thread_id"] = thread_id
+    queue = thread_queues.get(thread_id)
+    if queue is None:
+        queue = asyncio.Queue()
+        thread_queues[thread_id] = queue
+        asyncio.create_task(_thread_loop(queue))
+    await queue.put(job)
+
+
+async def _thread_loop(queue):
     while True:
-        job = await msg_queue.get()
+        job = await queue.get()
         try:
             await fan_out(job)
         finally:
-            msg_queue.task_done()
+            queue.task_done()
 
 
 @app.on_event("startup")
 async def on_startup():
-    asyncio.create_task(worker())
+    global provider_slots
+    provider_slots = asyncio.Semaphore(2)
     # Restore room history from disk — otherwise every redeploy wipes it.
     async with history_lock:
-        history.extend(load_history())
+        loaded = load_history()
+        if store.count_messages() == 0 and loaded:
+            store.backfill(loaded)
+        store.prune(retention_cutoff())
+        store.ensure_thread("desk", "Desk", "general")
+        store.seed_context({
+            "identity": DESK_CONTEXT.get("notes") or "",
+            "trading": (DESK_CONTEXT.get("glnd_lock") or "") + "\n" + (DESK_CONTEXT.get("risk") or ""),
+            "goal": DESK_CONTEXT.get("goal") or "",
+        })
+        restored = store.list_entries(HISTORY_KEEP)
+        history.extend(restored or loaded)
         del history[:max(0, len(history) - HISTORY_KEEP)]
         prune_uploads()
         # Restore the shared room memory so the bots keep remembering.
@@ -348,13 +498,14 @@ async def on_startup():
             body = digest.split("\n\n", 1)
             save_room_memory(body[1] if len(body) > 1 else digest)
     if "DESK_TOKEN" not in os.environ:
-        log.info("DESK_TOKEN not set — generated per-boot token.")
-    log.info("Desk Box up. Open /?token=%s", DESK_TOKEN)
+        log.info("DESK_TOKEN not set — generated per-boot token. Open /?token=%s", DESK_TOKEN)
+    else:
+        log.info("Desk Box up.")
 
 
 @app.get("/")
-async def index(token: str = ""):
-    if token != DESK_TOKEN:
+async def index(request: Request, token: str = ""):
+    if not _allowed(token, request.cookies.get("desk_session")):
         return JSONResponse({"error": "bad token"}, status_code=403)
     path = os.path.join(BASE_DIR, "static", "index.html")
     with open(path) as handle:
@@ -420,10 +571,10 @@ async def get_memory(token: str = ""):
 
 
 @app.post("/api/upload")
-async def upload(token: str = "", file: UploadFile = File(...)):
+async def upload(request: Request, token: str = "", file: UploadFile = File(...)):
     """Photo/video sharing. Stores the file on the durable volume,
     token-gated, pruned with the 14-day retention window."""
-    if token != DESK_TOKEN:
+    if not _allowed(token, request.cookies.get("desk_session")):
         return JSONResponse({"error": "bad token"}, status_code=403)
     raw_name = file.filename or ""
     ext = raw_name.rsplit(".", 1)[-1].lower() if "." in raw_name else ""
@@ -454,8 +605,8 @@ async def upload(token: str = "", file: UploadFile = File(...)):
 
 
 @app.get("/uploads/{fname}")
-async def get_upload(fname: str, token: str = ""):
-    if token != DESK_TOKEN:
+async def get_upload(fname: str, request: Request, token: str = ""):
+    if not _allowed(token, request.cookies.get("desk_session")):
         return JSONResponse({"error": "bad token"}, status_code=403)
     safe = os.path.basename(fname)
     if not UPLOAD_RE.match(safe):
@@ -482,13 +633,17 @@ async def ace_reply(request: Request):
     if attachment:
         entry["attachment"] = attachment
     if body.get("funnel_answer") is True:
-        # Marks this as the single synthesized answer to a funnel question
-        # so the bridge never synthesizes the same question twice.
+        # Marks this as the single synthesized answer to a funnel question.
+        # A second post for the same question is stored once and not rebroadcast.
         entry["funnel_answer"] = True
         entry["for_ts"] = str(body.get("for_ts") or "")
+        entry["for_message_id"] = str(body.get("for_message_id") or "")
+        if store.has_funnel_answer(entry["for_message_id"], entry["for_ts"]):
+            return JSONResponse({"ok": True, "duplicate": True})
     await remember(entry)
     bcast = {"type": "reply", "provider": "ace",
-             "round": 1, "text": text, "ts": entry["ts"]}
+             "round": 1, "text": text, "ts": entry["ts"],
+             "message_id": entry.get("id")}
     if attachment:
         bcast["attachment"] = attachment
     await room.broadcast(bcast)
@@ -502,9 +657,9 @@ async def ace_reply(request: Request):
                   "peer, not as Shavor. Direct and plain.]\n\n" + text)
         if kind == "video":
             framed += "\n\n[Ace shared a video.]"
-        await msg_queue.put({"text": framed, "crosstalk": False,
-                             "image": image, "funnel": False,
-                             "for_ts": entry["ts"]})
+        await enqueue({"text": framed, "crosstalk": False,
+                        "image": image, "funnel": False,
+                        "for_ts": entry["ts"], "thread_id": "desk"})
     return JSONResponse({"ok": True})
 
 
@@ -526,14 +681,13 @@ async def recent(token: str = "", limit: int = 20):
 @app.websocket("/ws")
 async def ws_endpoint(ws: WebSocket):
     token = ws.query_params.get("token", "")
-    if token != DESK_TOKEN:
+    if not _allowed(token, ws.cookies.get("desk_session")):
         await ws.close(code=4403)
         return
     await ws.accept()
     await room.add(ws)
     # send recent history so a fresh tab sees the room state
-    async with history_lock:
-        recent = list(history[-HISTORY_SEND:])
+    recent = store.list_entries(HISTORY_SEND)
     await ws.send_text(json.dumps({"type": "history", "messages": recent}))
     try:
         while True:
@@ -547,18 +701,53 @@ async def ws_endpoint(ws: WebSocket):
                 text = msg.get("text", "").strip()[:4000]
                 crosstalk = bool(msg.get("crosstalk"))
                 funnel = bool(msg.get("funnel"))
+                message_id = str(msg.get("message_id") or uuid.uuid4())
+                thread_id = str(msg.get("thread_id") or "desk")[:80]
+                store.ensure_thread(thread_id)
+                existing = store.get_message(message_id)
+                if existing:
+                    await ws.send_text(json.dumps({
+                        "type": "ack",
+                        "message_id": message_id,
+                        "thread_id": existing.get("thread_id") or thread_id,
+                        "duplicate": True,
+                        "state": "accepted",
+                    }))
+                    continue
                 attachment, image, kind = resolve_attachment(
                     msg.get("attachment"))
-                entry = {"from": "shavor", "text": text, "ts": now_iso()}
+                request_id = str(uuid.uuid4())
+                entry = {
+                    "id": message_id,
+                    "from": "shavor",
+                    "text": text,
+                    "ts": now_iso(),
+                    "thread_id": thread_id,
+                    "request_id": request_id,
+                    "mode": "one_answer" if funnel else "panel",
+                    "context_version": store.context_version(),
+                    "client_id": str(msg.get("client_id") or "")[:80] or None,
+                    "reply_to": str(msg.get("reply_to") or "") or None,
+                }
                 if funnel:
                     entry["funnel"] = True
                 if attachment:
                     entry["attachment"] = attachment
                 await remember(entry)
-                bcast = {"type": "user", "text": text, "ts": entry["ts"]}
+                bcast = {"type": "user", "text": text, "ts": entry["ts"],
+                         "message_id": message_id, "thread_id": thread_id,
+                         "reply_to": entry.get("reply_to")}
                 if attachment:
                     bcast["attachment"] = attachment
                 await room.broadcast(bcast)
+                await ws.send_text(json.dumps({
+                    "type": "ack",
+                    "message_id": message_id,
+                    "request_id": request_id,
+                    "thread_id": thread_id,
+                    "state": "accepted",
+                    "duplicate": False,
+                }))
                 # Bots get the photo itself (vision); video is acknowledged
                 # in words since the providers only take images.
                 bot_text = text
@@ -568,10 +757,196 @@ async def ws_endpoint(ws: WebSocket):
                     bot_text = (bot_text + "\n\n[Shavor shared a video.]"
                                 if bot_text else
                                 "[Shavor shared a video — acknowledge it.]")
-                await msg_queue.put({"text": bot_text, "crosstalk": crosstalk,
-                                     "image": image, "funnel": funnel,
-                                     "for_ts": entry["ts"]})
+                await enqueue({
+                    "text": bot_text, "crosstalk": crosstalk,
+                    "image": image, "funnel": funnel,
+                    "for_ts": entry["ts"], "message_id": message_id,
+                    "thread_id": thread_id, "request_id": request_id,
+                    "context_version": entry["context_version"],
+                })
     except WebSocketDisconnect:
         pass
     finally:
         await room.remove(ws)
+
+
+@app.post("/api/v2/session")
+async def open_session(request: Request):
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "bad body"}, status_code=400)
+    if body.get("token") != DESK_TOKEN:
+        return JSONResponse({"error": "bad token"}, status_code=403)
+    session_id = store.create_session()
+    response = JSONResponse({"ok": True})
+    response.set_cookie(
+        "desk_session", session_id, httponly=True, samesite="lax",
+        secure=request.url.scheme == "https", max_age=14 * 24 * 3600, path="/",
+    )
+    return response
+
+
+@app.post("/api/v2/session/revoke")
+async def revoke_session(request: Request):
+    store.revoke_session(request.cookies.get("desk_session"))
+    response = JSONResponse({"ok": True})
+    response.delete_cookie("desk_session", path="/")
+    return response
+
+
+@app.get("/api/ace/jobs/next")
+async def ace_job_next(token: str = ""):
+    if token != DESK_TOKEN:
+        return JSONResponse({"error": "bad token"}, status_code=403)
+    job = store.claim_job()
+    return {"job": job}
+
+
+@app.post("/api/ace/jobs/{job_id}/complete")
+async def ace_job_complete(job_id: str, request: Request):
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "bad body"}, status_code=400)
+    if body.get("token") != DESK_TOKEN:
+        return JSONResponse({"error": "bad token"}, status_code=403)
+    result = body.get("result") if isinstance(body.get("result"), dict) else {
+        "answer": str(body.get("text") or body.get("answer") or "")[:4000],
+        "agreement": body.get("agreement") or "agrees",
+        "why": body.get("why") or "",
+        "action": body.get("action") or [],
+        "risk": body.get("risk") or "",
+        "sources": body.get("sources") or [],
+        "desk_notes": body.get("desk_notes") or "",
+    }
+    if not str(result.get("answer") or "").strip():
+        return JSONResponse({"error": "empty"}, status_code=400)
+    status = await finish_ace_job(job_id, result)
+    if status == "missing":
+        return JSONResponse({"error": "not found"}, status_code=404)
+    if status == "duplicate":
+        return JSONResponse({"error": "already complete"}, status_code=409)
+    return {"ok": True}
+
+
+@app.post("/api/ace/jobs/{job_id}/fail")
+async def ace_job_fail(job_id: str, request: Request):
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "bad body"}, status_code=400)
+    if body.get("token") != DESK_TOKEN:
+        return JSONResponse({"error": "bad token"}, status_code=403)
+    status = store.fail_job(job_id, str(body.get("reason") or "failed"), retry=body.get("retry", True) is not False)
+    if status == "missing":
+        return JSONResponse({"error": "not found"}, status_code=404)
+    if status == "duplicate":
+        return JSONResponse({"error": "already complete"}, status_code=409)
+    return {"ok": True, "status": status}
+
+
+@app.get("/api/v2/threads")
+async def list_threads(request: Request, token: str = ""):
+    if not _allowed(token, request.cookies.get("desk_session")):
+        return JSONResponse({"error": "bad token"}, status_code=403)
+    return {"threads": store.list_threads()}
+
+
+@app.post("/api/v2/threads")
+async def create_thread(request: Request, token: str = ""):
+    if not _allowed(token, request.cookies.get("desk_session")):
+        return JSONResponse({"error": "bad token"}, status_code=403)
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    kind = str(body.get("type") or "general")
+    if kind not in ("general", "trading", "app_build", "health", "family", "custom"):
+        kind = "custom" if kind else "general"
+    thread = store.create_thread(str(body.get("title") or "Thread"), kind)
+    return thread
+
+
+@app.get("/api/v2/search")
+async def search_messages(request: Request, token: str = "", q: str = ""):
+    if not _allowed(token, request.cookies.get("desk_session")):
+        return JSONResponse({"error": "bad token"}, status_code=403)
+    if not q.strip():
+        return {"messages": []}
+    return {"messages": store.search(q[:80])}
+
+
+@app.post("/api/v2/messages/{message_id}/pin")
+async def pin_message(message_id: str, request: Request, token: str = ""):
+    if not _allowed(token, request.cookies.get("desk_session")):
+        return JSONResponse({"error": "bad token"}, status_code=403)
+    pinned = store.pin(message_id)
+    if pinned is None:
+        return JSONResponse({"error": "not found"}, status_code=404)
+    async with history_lock:
+        for item in history:
+            if item.get("id") == message_id or item.get("message_id") == message_id:
+                item["pinned"] = pinned
+    return {"ok": True, "pinned": pinned}
+
+
+@app.post("/api/v2/messages/{message_id}/retry")
+async def retry_message(message_id: str, request: Request, token: str = ""):
+    if not _allowed(token, request.cookies.get("desk_session")):
+        return JSONResponse({"error": "bad token"}, status_code=403)
+    original = store.get_message(message_id)
+    if not original or original.get("from") != "shavor":
+        return JSONResponse({"error": "not found"}, status_code=404)
+    request_id = str(uuid.uuid4())
+    await enqueue({
+        "text": original.get("text") or "",
+        "crosstalk": False,
+        "image": None,
+        "funnel": original.get("mode") != "panel",
+        "for_ts": original.get("ts"),
+        "message_id": message_id,
+        "thread_id": original.get("thread_id") or "desk",
+        "request_id": request_id,
+        "context_version": store.context_version(),
+    })
+    return {"ok": True, "request_id": request_id}
+
+
+@app.get("/api/v2/context")
+async def get_context(request: Request, token: str = ""):
+    if not _allowed(token, request.cookies.get("desk_session")):
+        return JSONResponse({"error": "bad token"}, status_code=403)
+    return {"version": store.context_version(), "packs": store.context_packs()}
+
+
+@app.post("/api/v2/context")
+async def set_context(request: Request):
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "bad body"}, status_code=400)
+    if body.get("token") != DESK_TOKEN:
+        return JSONResponse({"error": "bad token"}, status_code=403)
+    name = str(body.get("name") or "").strip()[:40]
+    if not name:
+        return JSONResponse({"error": "name required"}, status_code=400)
+    version = store.update_context(name, str(body.get("body") or "")[:4000], "ace")
+    return {"ok": True, "version": version}
+
+
+@app.post("/api/v2/decisions")
+async def create_decision(request: Request, token: str = ""):
+    if not _allowed(token, request.cookies.get("desk_session")):
+        return JSONResponse({"error": "bad token"}, status_code=403)
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "bad body"}, status_code=400)
+    title = str(body.get("title") or "").strip()
+    if not title:
+        return JSONResponse({"error": "empty"}, status_code=400)
+    return store.add_decision(
+        title, str(body.get("status") or "active"),
+        body.get("message_id"), body.get("thread_id"),
+    )

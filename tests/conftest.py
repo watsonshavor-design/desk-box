@@ -11,6 +11,7 @@ _DATA = tempfile.mkdtemp(prefix="desk-box-test-")
 os.environ["DESK_TOKEN"] = "test-token"
 os.environ["DESK_DATA_DIR"] = _DATA
 os.environ["MOCK_PROVIDERS"] = "1"
+os.environ["ACE_AUTO"] = "0"
 os.environ.setdefault("XAI_API_KEY", "")
 os.environ.setdefault("GEMINI_API_KEY", "")
 
@@ -29,6 +30,8 @@ def client():
 @pytest.fixture(autouse=True)
 def _reset_room(client):
     app_module.history.clear()
+    app_module.store.wipe()
+    app_module.thread_queues.clear()
     log_path = app_module.LOG_PATH
     if os.path.exists(log_path):
         os.remove(log_path)
