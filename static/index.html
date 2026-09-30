@@ -1,107 +1,758 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
-<title>Shavor's Desk ♠️</title>
-<link rel="manifest" href="/static/manifest.json">
-<meta name="theme-color" content="#0d1117">
-<meta name="mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="Shavor's Desk">
-<link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
-<link rel="icon" type="image/png" sizes="32x32" href="/static/favicon-32.png">
-<style>
-  :root { --bg:#0d1117; --panel:#161b22; --line:#2a3139; --txt:#e6edf3;
-          --dim:#8b949e; --grok:#a371f7; --gemini:#58a6ff; --me:#238636; }
-  * { box-sizing:border-box; }
-  body { margin:0; background:var(--bg); color:var(--txt);
-         font-family:-apple-system,system-ui,"Segoe UI",Roboto,sans-serif;
-         display:flex; flex-direction:column; height:100dvh; }
-  header { padding:10px 14px; border-bottom:1px solid var(--line);
-           display:flex; align-items:center; gap:10px; background:var(--panel); }
-  header h1 { font-size:16px; margin:0; font-weight:600; }
-  header .spade { color:var(--grok); }
-  #status { margin-left:auto; font-size:12px; color:var(--dim); }
-  #status.on { color:#3fb950; }
-  .iconbtn { background:transparent; border:1px solid var(--line); color:var(--txt);
-             border-radius:10px; padding:7px 10px; font-size:16px; cursor:pointer; }
-  .iconbtn.on { border-color:var(--grok); background:#221a38; }
-  .iconbtn.rec { border-color:#f85149; background:#3d1414; }
-  /* File picker stays in the DOM but invisible: a <label for> opens it
-     natively, which mobile browsers honor (JS .click() on a hidden
-     input gets silently swallowed). */
-  .filehidden { position:absolute; width:1px; height:1px; opacity:0;
-                pointer-events:none; }
-  label.iconbtn { user-select:none; -webkit-user-select:none; }
-  #desk { font-size:12px; color:var(--dim); background:var(--panel);
-          border-bottom:1px solid var(--line); padding:8px 14px; line-height:1.5; }
-  #desk b { color:var(--txt); }
-  #desk .greet { color:var(--txt); font-weight:600; }
-  #log { flex:1; overflow-y:auto; padding:14px; display:flex;
-         flex-direction:column; gap:10px; }
-  .msg { max-width:92%; padding:10px 12px; border-radius:12px; line-height:1.5;
-         font-size:14px; white-space:pre-wrap; word-wrap:break-word; }
-  .msg.me { align-self:flex-end; background:#12351f; border:1px solid #1f5c33; }
-  .msg.grok { align-self:flex-start; background:var(--panel);
-              border:1px solid var(--line); border-left:3px solid var(--grok); }
-  .msg.gemini { align-self:flex-start; background:var(--panel);
-              border:1px solid var(--line); border-left:3px solid var(--gemini); }
-  .msg.ace { align-self:flex-start; background:var(--panel);
-              border:1px solid var(--line); border-left:3px solid #3fb950; }
-  .who { font-size:11px; font-weight:700; letter-spacing:.06em; margin-bottom:4px; }
-  .who img.av { width:18px; height:18px; border-radius:50%;
-                vertical-align:-4px; margin-right:6px; }
-  .who.grok { color:var(--grok); } .who.gemini { color:var(--gemini); }
-  .who.me { color:#3fb950; } .who.ace { color:#3fb950; }
-  .round { font-size:10px; color:var(--dim); margin-left:6px; font-weight:400; }
-  .ts { font-size:10px; color:var(--dim); margin-left:6px; font-weight:400; }
-  .thinking { font-size:12px; color:var(--dim); font-style:italic; }
-  #bar { display:flex; gap:8px; padding:10px 12px; border-top:1px solid var(--line);
-         background:var(--panel); align-items:center; }
-  #input { flex:1; background:var(--bg); border:1px solid var(--line); color:var(--txt);
-           border-radius:10px; padding:10px 12px; font-size:15px; outline:none; }
-  #input:focus { border-color:var(--grok); }
-  #send { background:var(--grok); border:0; color:#fff; font-weight:700;
-          border-radius:10px; padding:10px 16px; font-size:15px; cursor:pointer; }
-  #send:disabled { opacity:.4; }
-  .toggle { display:flex; align-items:center; gap:6px; font-size:12px; color:var(--dim);
-            white-space:nowrap; }
-  #gate { margin:auto; max-width:340px; text-align:center; padding:24px;
-          background:var(--panel); border:1px solid var(--line); border-radius:14px; }
-  #gate h2 { margin:0 0 8px; font-size:17px; }
-  #gate p { color:var(--dim); font-size:13px; line-height:1.5; }
-  #gate input { width:100%; background:var(--bg); border:1px solid var(--line);
-                color:var(--txt); border-radius:10px; padding:10px 12px;
-                font-size:15px; margin:8px 0; outline:none; }
-  #gate button { width:100%; background:var(--grok); border:0; color:#fff;
-                 font-weight:700; border-radius:10px; padding:11px; font-size:15px; }
-  @media (max-width:640px){ #desk{font-size:11px} .toggle span{display:none} }
-</style>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="color-scheme" content="light dark" />
+  <meta name="theme-color" content="#171022" />
+  <link rel="icon" href="data:," />
+  <title>Shavor's Desk</title>
+  <link rel="manifest" href="/static/manifest.json">
+  <link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/static/favicon-32.png">
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500&display=swap');
+
+    :root {
+      color-scheme: light dark;
+      --bg: #f2eff8;
+      --surface: #ffffff;
+      --surface-2: #f7f4fb;
+      --surface-3: #ece6f5;
+      --ink: #21172d;
+      --muted: #6d6179;
+      --line: #ded5e9;
+      --accent: #7652b8;
+      --accent-strong: #56348f;
+      --accent-soft: #e9def8;
+      --warm: #bd642f;
+      --warm-soft: #fae9df;
+      --blue: #4c719e;
+      --blue-soft: #e4edf8;
+      --danger: #b64855;
+      --shadow: 0 16px 48px rgba(49, 29, 76, .12);
+      --radius-lg: 24px;
+      --radius-md: 16px;
+      --radius-sm: 11px;
+      --sidebar: 232px;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #0d0913;
+        --surface: #171020;
+        --surface-2: #21172d;
+        --surface-3: #2c1f3b;
+        --ink: #f6f0fb;
+        --muted: #b1a3be;
+        --line: #3a2a4b;
+        --accent: #aa7bea;
+        --accent-strong: #c59cf3;
+        --accent-soft: #38234f;
+        --warm: #ef9360;
+        --warm-soft: #40271d;
+        --blue: #8eb6e8;
+        --blue-soft: #21324a;
+        --danger: #f08a98;
+        --shadow: 0 16px 52px rgba(0, 0, 0, .38);
+      }
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: "DM Sans", sans-serif;
+      min-height: 100vh;
+      overflow-x: hidden;
+    }
+    button, input { font: inherit; }
+    button { color: inherit; }
+    button:focus-visible, input:focus-visible { outline: 3px solid color-mix(in srgb, var(--accent) 45%, transparent); outline-offset: 2px; }
+    svg { display: block; }
+
+    .app { min-height: 100vh; display: grid; grid-template-columns: var(--sidebar) minmax(0, 1fr); }
+    .rail {
+      position: fixed;
+      inset: 0 auto 0 0;
+      width: var(--sidebar);
+      padding: 26px 18px 22px;
+      background: var(--surface);
+      border-right: 1px solid var(--line);
+      display: flex;
+      flex-direction: column;
+      z-index: 20;
+    }
+    .rail-status { display: flex; align-items: center; gap: 11px; padding: 4px 8px 24px; }
+    .status-ace { width: 34px; height: 38px; color: var(--accent); flex: 0 0 auto; }
+    .status-ace svg { width: 100%; height: 100%; filter: drop-shadow(0 5px 9px color-mix(in srgb, var(--accent) 22%, transparent)); }
+    .rail-status strong { display:block; font-size: 14px; }
+    .rail-status small { color: var(--muted); font-size: 11px; }
+    .live-dot { display: inline-block; width: 7px; height: 7px; margin-right: 5px; border-radius: 50%; background: #22a06b; box-shadow: 0 0 0 3px color-mix(in srgb, #22a06b 20%, transparent); }
+
+    .nav-list { display: grid; gap: 6px; }
+    .nav-btn {
+      width: 100%; border: 0; background: transparent; border-radius: 12px;
+      padding: 11px 12px; display:flex; align-items:center; gap: 12px;
+      color: var(--muted); font-weight: 600; text-align:left; cursor:pointer;
+    }
+    .nav-btn svg { width: 19px; height: 19px; }
+    .nav-btn.active { background: var(--accent-soft); color: var(--accent-strong); }
+    .nav-btn .count { margin-left: auto; min-width: 22px; padding: 2px 6px; border-radius: 20px; background: var(--surface-3); font: 500 11px "IBM Plex Mono", monospace; text-align:center; }
+    .nav-btn.active .count { background: var(--surface); }
+    .rail-foot { margin-top:auto; }
+    .mode-card { padding: 14px; background: var(--surface-2); border-radius: var(--radius-md); }
+    .mode-card .mode-row { display:flex; align-items:center; justify-content:space-between; gap:10px; }
+    .mode-card strong { font-size: 13px; }
+    .mode-card p { margin:8px 0 0; color:var(--muted); font-size:11px; line-height:1.45; }
+
+    .switch { width: 42px; height: 24px; border:0; border-radius:20px; background:var(--line); padding:3px; cursor:pointer; transition:.2s; }
+    .switch::after { content:""; display:block; width:18px; height:18px; border-radius:50%; background:white; box-shadow:0 2px 6px rgba(0,0,0,.24); transition:.2s; }
+    .switch[aria-checked="true"] { background:var(--accent); }
+    .switch[aria-checked="true"]::after { transform:translateX(18px); }
+
+    .main { grid-column: 2; min-width:0; padding: 34px clamp(22px, 4vw, 60px) 70px; }
+    .topbar { display:flex; justify-content:space-between; align-items:flex-start; gap:24px; margin-bottom:28px; }
+    .eyebrow { margin:0 0 5px; color:var(--muted); font-size:13px; font-weight:600; }
+    h1 { margin:0; font-size:clamp(28px, 3.4vw, 42px); line-height:1.08; letter-spacing:-.035em; }
+    .top-actions { display:flex; gap:8px; align-items:center; }
+    .icon-btn { width:42px; height:42px; border:1px solid var(--line); border-radius:50%; background:var(--surface); display:grid; place-items:center; cursor:pointer; }
+    .icon-btn svg { width:19px; height:19px; }
+    .proto-badge { display:flex; align-items:center; gap:7px; height:42px; padding:0 13px; border-radius:22px; background:var(--surface); border:1px solid var(--line); color:var(--muted); font-size:12px; font-weight:600; white-space:nowrap; }
+
+    .view { display:none; animation: viewIn .24s ease; }
+    .view.active { display:block; }
+    @keyframes viewIn { from{opacity:.25; transform:translateY(4px)} to{opacity:1;transform:none} }
+    @media (prefers-reduced-motion: reduce) { * { animation:none !important; transition:none !important; scroll-behavior:auto !important; } }
+
+    .today-grid { display:grid; grid-template-columns:minmax(0,1.45fr) minmax(300px,.8fr); gap:18px; }
+    .stack { display:grid; gap:18px; align-content:start; }
+    .card { background:var(--surface); border:1px solid var(--line); box-shadow:0 1px 0 rgba(0,0,0,.02); }
+    .lead-card { border-radius:var(--radius-lg); padding:clamp(22px,3.5vw,36px); min-height:295px; position:relative; overflow:hidden; }
+    .lead-card::after { content:""; position:absolute; width:250px; height:250px; border-radius:50%; right:-110px; bottom:-145px; border:50px solid var(--accent-soft); opacity:.85; }
+    .lead-card > * { position:relative; z-index:1; }
+    .section-label { color:var(--accent-strong); font-size:12px; font-weight:700; margin:0 0 12px; }
+    .lead-card h2 { font-size:clamp(23px,3vw,34px); line-height:1.15; letter-spacing:-.03em; max-width:620px; margin:0 0 14px; }
+    .lead-card p { color:var(--muted); font-size:15px; line-height:1.62; max-width:590px; margin:0; }
+    .answer-meta { margin-top:24px; display:flex; gap:8px; flex-wrap:wrap; }
+    .voice-pill { display:inline-flex; align-items:center; gap:7px; padding:7px 10px; border-radius:10px; background:var(--surface-2); color:var(--muted); font-size:11px; font-weight:600; }
+    .voice-pill i { width:7px; height:7px; border-radius:50%; background:var(--accent); }
+    .voice-pill.warm i { background:var(--warm); }
+    .voice-pill.blue i { background:var(--blue); }
+    .card-actions { display:flex; gap:8px; flex-wrap:wrap; margin-top:25px; }
+    .primary-btn, .ghost-btn { border:0; border-radius:12px; padding:10px 14px; font-weight:700; font-size:13px; cursor:pointer; }
+    .primary-btn { background:var(--accent); color:#fff; }
+    @media (prefers-color-scheme: dark){ .primary-btn{color:#160d21;} }
+    .ghost-btn { background:var(--surface-3); color:var(--ink); }
+
+    .mini-card { padding:18px; border-radius:var(--radius-md); }
+    .card-head { display:flex; align-items:center; justify-content:space-between; gap:16px; margin-bottom:14px; }
+    .card-head h3 { margin:0; font-size:15px; letter-spacing:-.01em; }
+    .text-btn { border:0; background:transparent; color:var(--accent-strong); padding:2px; font-weight:700; font-size:12px; cursor:pointer; }
+    .progress { height:7px; background:var(--surface-3); border-radius:8px; overflow:hidden; margin:11px 0 8px; }
+    .progress span { display:block; width:66%; height:100%; background:var(--accent); border-radius:8px; }
+    .metric-row { display:flex; justify-content:space-between; gap:12px; color:var(--muted); font-size:12px; }
+    .task-list { display:grid; gap:8px; }
+    .task-row { width:100%; border:0; background:var(--surface-2); border-radius:12px; padding:12px; display:grid; grid-template-columns:auto minmax(0,1fr) auto; gap:10px; align-items:center; text-align:left; cursor:pointer; }
+    .task-marker { width:9px; height:9px; border-radius:50%; background:var(--warm); }
+    .task-marker.green { background:var(--accent); }
+    .task-copy strong { display:block; font-size:13px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .task-copy small { color:var(--muted); font-size:11px; }
+    .task-arrow { color:var(--muted); }
+    .system-line { display:grid; grid-template-columns:auto 1fr auto; gap:10px; align-items:center; font-size:12px; padding:9px 0; border-bottom:1px solid var(--line); }
+    .system-line:last-child { border-bottom:0; padding-bottom:0; }
+    .system-line .state { color:var(--accent-strong); font-weight:700; }
+    .system-line .state.warn { color:var(--warm); }
+    .sys-icon { width:28px; height:28px; border-radius:9px; display:grid; place-items:center; background:var(--accent-soft); color:var(--accent-strong); }
+    .sys-icon svg { width:15px; height:15px; }
+    .app-card { padding:18px; border-radius:var(--radius-md); }
+    .app-card .card-head { margin-bottom:11px; }
+    .app-card-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; }
+    .app-launcher { border:0; background:var(--surface-2); border-radius:12px; padding:11px 6px 9px; min-width:0; display:grid; place-items:center; gap:6px; cursor:pointer; }
+    .app-launcher:hover { background:var(--accent-soft); }
+    .app-launcher svg { width:22px; height:22px; color:var(--accent-strong); }
+    .app-launcher span { max-width:100%; overflow:hidden; text-overflow:ellipsis; font-size:10px; font-weight:700; }
+    .app-card-foot { margin:11px 0 0; color:var(--muted); font-size:10px; line-height:1.45; }
+
+    .quick-strip { display:grid; grid-template-columns:repeat(4,1fr); gap:12px; margin-top:18px; }
+    .quick-card { border:1px solid var(--line); background:var(--surface); border-radius:var(--radius-md); padding:17px; text-align:left; cursor:pointer; min-height:126px; }
+    .quick-card svg { width:22px; height:22px; color:var(--accent-strong); margin-bottom:18px; }
+    .quick-card strong { display:block; font-size:14px; }
+    .quick-card span { color:var(--muted); font-size:12px; line-height:1.4; display:block; margin-top:4px; }
+
+    .chat-layout { display:grid; grid-template-columns:minmax(0,1.5fr) minmax(280px,.65fr); gap:18px; align-items:start; }
+    .chat-panel { border-radius:var(--radius-lg); overflow:hidden; min-height:660px; display:flex; flex-direction:column; }
+    .chat-toolbar { padding:15px 18px; border-bottom:1px solid var(--line); display:flex; justify-content:space-between; gap:12px; align-items:center; }
+    .personas { display:flex; gap:6px; flex-wrap:wrap; }
+    .filter-chip { border:1px solid var(--line); background:transparent; color:var(--muted); padding:6px 9px; border-radius:20px; font-size:11px; font-weight:700; cursor:pointer; }
+    .filter-chip.active { background:var(--surface-3); color:var(--ink); }
+    .mode-inline { display:flex; align-items:center; gap:9px; font-size:11px; color:var(--muted); font-weight:600; }
+    .messages { padding:22px; display:grid; gap:18px; flex:1; align-content:start; }
+    .message { display:grid; grid-template-columns:30px minmax(0,1fr); gap:10px; max-width:760px; }
+    .message.me { margin-left:auto; grid-template-columns:minmax(0,1fr); max-width:75%; }
+    .avatar { width:30px; height:30px; border-radius:10px; display:grid; place-items:center; background:var(--accent-soft); color:var(--accent-strong); font:700 11px "IBM Plex Mono",monospace; }
+    .bubble { background:var(--surface-2); border-radius:4px 15px 15px 15px; padding:13px 15px; }
+    .message.me .bubble { background:var(--accent); color:white; border-radius:15px 4px 15px 15px; }
+    .bubble-head { display:flex; align-items:baseline; gap:8px; margin-bottom:5px; }
+    .bubble-head strong { font-size:12px; }
+    .bubble-head time { color:var(--muted); font-size:10px; }
+    .bubble p { margin:0; font-size:13px; line-height:1.55; }
+    .synthesis { background:var(--surface); border:1px solid var(--line); box-shadow:var(--shadow); }
+    .synthesis .bubble-head strong { color:var(--accent-strong); }
+    .source-toggle { margin-top:11px; border:0; padding:0; background:transparent; color:var(--accent-strong); font-weight:700; font-size:11px; cursor:pointer; }
+    .source-takes { display:none; margin-top:11px; padding-top:11px; border-top:1px solid var(--line); gap:8px; }
+    .source-takes.open { display:grid; }
+    .take { padding:10px; border-radius:10px; background:var(--surface-2); font-size:11px; line-height:1.45; color:var(--muted); }
+    .take b { color:var(--ink); }
+    .composer { border-top:1px solid var(--line); padding:14px; }
+    .compose-box { border:1px solid var(--line); border-radius:15px; background:var(--surface-2); padding:11px; }
+    .compose-box input { width:100%; border:0; background:transparent; color:var(--ink); padding:3px 2px 12px; font-size:13px; }
+    .compose-box input::placeholder { color:var(--muted); }
+    .compose-tools { display:flex; justify-content:space-between; gap:10px; align-items:center; }
+    .toolset { display:flex; gap:5px; }
+    .mini-icon { border:0; background:transparent; color:var(--muted); width:31px; height:31px; border-radius:9px; display:grid; place-items:center; cursor:pointer; }
+    .mini-icon:hover { background:var(--surface-3); color:var(--ink); }
+    .mini-icon svg { width:17px; height:17px; }
+    .draft-note { color:var(--muted); font-size:10px; }
+    .send-demo { border:0; background:var(--accent); color:#fff; width:31px; height:31px; border-radius:10px; display:grid; place-items:center; cursor:pointer; }
+    .send-demo svg { width:16px; height:16px; }
+
+    .protocol-card { border-radius:var(--radius-lg); padding:20px; }
+    .protocol-card > p { margin:6px 0 18px; color:var(--muted); font-size:12px; line-height:1.5; }
+    .protocol-step { display:grid; grid-template-columns:28px minmax(0,1fr); gap:10px; padding:11px 0; border-top:1px solid var(--line); }
+    .step-num { width:25px; height:25px; border-radius:8px; background:var(--surface-3); display:grid; place-items:center; color:var(--accent-strong); font:600 11px "IBM Plex Mono",monospace; }
+    .protocol-step strong { display:block; font-size:12px; margin-bottom:3px; }
+    .protocol-step span { color:var(--muted); font-size:11px; line-height:1.4; }
+
+    .page-intro { max-width:720px; margin-bottom:22px; color:var(--muted); font-size:14px; line-height:1.6; }
+    .task-board { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:14px; }
+    .task-column { background:var(--surface-2); border:1px solid var(--line); border-radius:var(--radius-lg); padding:14px; min-height:440px; }
+    .column-head { display:flex; justify-content:space-between; align-items:center; padding:4px 4px 13px; }
+    .column-head strong { font-size:13px; }
+    .column-head span { color:var(--muted); font:500 11px "IBM Plex Mono",monospace; }
+    .task-tile { width:100%; border:1px solid var(--line); background:var(--surface); border-radius:14px; padding:15px; text-align:left; margin-bottom:10px; cursor:pointer; }
+    .task-tile .tag { display:inline-block; padding:4px 7px; border-radius:7px; background:var(--accent-soft); color:var(--accent-strong); font-size:9px; font-weight:700; margin-bottom:10px; }
+    .task-tile .tag.orange { background:var(--warm-soft); color:var(--warm); }
+    .task-tile h3 { margin:0 0 7px; font-size:14px; line-height:1.35; }
+    .task-tile p { margin:0; color:var(--muted); font-size:11px; line-height:1.5; }
+    .task-tile footer { display:flex; justify-content:space-between; align-items:center; color:var(--muted); font-size:10px; margin-top:14px; }
+    .owners { display:flex; }
+    .owner { width:23px; height:23px; border:2px solid var(--surface); border-radius:50%; display:grid; place-items:center; margin-left:-5px; background:var(--accent-soft); color:var(--accent-strong); font:700 8px "IBM Plex Mono",monospace; }
+    .owner:first-child { margin-left:0; }
+    .owner.rail { background:var(--warm-soft); color:var(--warm); }
+    .owner.anchor { background:var(--blue-soft); color:var(--blue); }
+
+    .brief-controls { display:flex; gap:7px; flex-wrap:wrap; margin-bottom:20px; }
+    .brief-tab { border:1px solid var(--line); background:var(--surface); border-radius:10px; padding:8px 12px; color:var(--muted); font-size:12px; font-weight:700; cursor:pointer; }
+    .brief-tab.active { background:var(--ink); color:var(--surface); border-color:var(--ink); }
+    .brief-page { display:none; }
+    .brief-page.active { display:block; }
+    .brief-grid { display:grid; grid-template-columns:minmax(0,1.2fr) minmax(290px,.8fr); gap:16px; }
+    .brief-hero { border-radius:var(--radius-lg); padding:26px; }
+    .brief-hero .stamp { color:var(--muted); font:500 10px "IBM Plex Mono",monospace; }
+    .brief-hero h2 { font-size:28px; line-height:1.2; letter-spacing:-.03em; margin:12px 0 14px; }
+    .brief-hero p { color:var(--muted); line-height:1.65; font-size:14px; }
+    .data-strip { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin-top:22px; }
+    .datum { background:var(--surface-2); border-radius:12px; padding:12px; }
+    .datum span { display:block; color:var(--muted); font-size:9px; margin-bottom:5px; }
+    .datum strong { font:600 15px "IBM Plex Mono",monospace; }
+    .insight-list { display:grid; gap:10px; }
+    .insight { border-radius:var(--radius-md); padding:17px; }
+    .insight strong { display:block; font-size:13px; margin-bottom:6px; }
+    .insight p { margin:0; color:var(--muted); font-size:11px; line-height:1.55; }
+    .news-list { display:grid; gap:11px; }
+    .news-item { border-radius:var(--radius-md); padding:18px; display:grid; grid-template-columns:auto minmax(0,1fr); gap:14px; align-items:start; }
+    .news-date { width:48px; text-align:center; padding:8px 4px; border-radius:12px; background:var(--surface-2); }
+    .news-date b { display:block; font:700 18px "IBM Plex Mono",monospace; }
+    .news-date span { color:var(--muted); font-size:9px; }
+    .news-item h3 { margin:1px 0 5px; font-size:14px; }
+    .news-item p { margin:0; color:var(--muted); font-size:11px; line-height:1.5; }
+
+    .market-grid { display:grid; grid-template-columns:minmax(0,1.35fr) minmax(280px,.65fr); gap:16px; align-items:start; }
+    .movers-card { border-radius:var(--radius-lg); overflow:hidden; }
+    .movers-head { display:flex; justify-content:space-between; align-items:flex-start; gap:18px; padding:22px 22px 17px; border-bottom:1px solid var(--line); }
+    .movers-head h2 { margin:0 0 5px; font-size:22px; letter-spacing:-.025em; }
+    .movers-head p { margin:0; color:var(--muted); font-size:12px; }
+    .source-tabs { display:flex; flex-wrap:wrap; gap:6px; justify-content:flex-end; }
+    .source-tab { border:1px solid var(--line); background:var(--surface-2); color:var(--muted); border-radius:10px; padding:7px 10px; font-size:11px; font-weight:700; cursor:pointer; }
+    .source-tab.active { background:var(--accent); color:#fff; border-color:var(--accent); }
+    .movers-columns { display:grid; grid-template-columns:48px minmax(0,1fr) 94px 94px; gap:10px; padding:11px 22px; color:var(--muted); font:600 10px "IBM Plex Mono",monospace; border-bottom:1px solid var(--line); }
+    .movers-columns span:nth-child(n+3) { text-align:right; }
+    .feed-empty { padding:34px 22px 30px; text-align:center; }
+    .feed-empty-icon { width:48px; height:48px; margin:0 auto 15px; border-radius:15px; background:var(--accent-soft); color:var(--accent-strong); display:grid; place-items:center; }
+    .feed-empty-icon svg { width:23px; height:23px; }
+    .feed-empty h3 { margin:0 0 7px; font-size:16px; }
+    .feed-empty p { max-width:480px; margin:0 auto; color:var(--muted); font-size:12px; line-height:1.55; }
+    .feed-status { display:inline-flex; align-items:center; gap:7px; margin-top:16px; padding:7px 10px; border-radius:9px; background:var(--surface-2); color:var(--muted); font-size:10px; font-weight:700; }
+    .feed-status i { width:7px; height:7px; border-radius:50%; background:var(--warm); }
+    .integration-card { border-radius:var(--radius-lg); padding:20px; }
+    .integration-card h3 { margin:0; font-size:16px; }
+    .integration-card > p { margin:7px 0 18px; color:var(--muted); font-size:12px; line-height:1.5; }
+    .feed-feature { display:grid; grid-template-columns:30px minmax(0,1fr); gap:10px; padding:12px 0; border-top:1px solid var(--line); }
+    .feed-feature svg { width:18px; height:18px; margin:2px 0 0 5px; color:var(--accent-strong); }
+    .feed-feature strong { display:block; font-size:12px; margin-bottom:3px; }
+    .feed-feature span { display:block; color:var(--muted); font-size:11px; line-height:1.45; }
+    .watch-snapshot { margin-top:16px; border-radius:var(--radius-md); padding:17px 20px; display:flex; justify-content:space-between; gap:18px; align-items:center; }
+    .watch-snapshot small { display:block; color:var(--muted); font-size:10px; margin-bottom:4px; }
+    .watch-snapshot strong { font-size:14px; }
+    .watch-price { text-align:right; font-family:"IBM Plex Mono",monospace; }
+    .watch-price b { display:block; color:var(--accent-strong); font-size:15px; }
+    .watch-price span { color:var(--muted); font-size:10px; }
+
+    .source-hub { display:grid; grid-template-columns:minmax(0,1.25fr) minmax(280px,.75fr); gap:16px; align-items:start; }
+    .source-panel, .bluetooth-panel { border-radius:var(--radius-lg); padding:22px; }
+    .source-panel h2, .bluetooth-panel h3 { margin:0; letter-spacing:-.02em; }
+    .source-panel h2 { font-size:24px; }
+    .bluetooth-panel h3 { font-size:16px; }
+    .source-panel > p, .bluetooth-panel > p { margin:7px 0 18px; color:var(--muted); font-size:12px; line-height:1.55; }
+    .source-list { display:grid; gap:9px; }
+    .source-row { display:grid; grid-template-columns:42px minmax(0,1fr) auto; gap:12px; align-items:center; padding:13px; border-radius:14px; background:var(--surface-2); }
+    .source-id { width:42px; height:42px; border-radius:13px; display:grid; place-items:center; background:var(--accent-soft); color:var(--accent-strong); }
+    .source-id svg { width:21px; height:21px; }
+    .source-copy strong { display:block; font-size:13px; }
+    .source-copy span { display:block; margin-top:3px; color:var(--muted); font-size:10px; line-height:1.4; }
+    .source-action { display:grid; justify-items:end; gap:5px; }
+    .source-action small { color:var(--muted); font-size:9px; font-weight:700; }
+    .source-summary { margin-top:15px; padding:12px 14px; border:1px dashed var(--line); border-radius:12px; color:var(--muted); font-size:11px; line-height:1.5; }
+    .source-summary strong { color:var(--ink); }
+    .bluetooth-control { display:flex; align-items:center; justify-content:space-between; gap:14px; padding:14px 0; border-top:1px solid var(--line); border-bottom:1px solid var(--line); }
+    .bluetooth-control strong { display:block; font-size:13px; }
+    .bluetooth-control span { display:block; margin-top:3px; color:var(--muted); font-size:10px; }
+    .bluetooth-note { margin-top:15px; padding:12px; border-radius:12px; background:var(--accent-soft); color:var(--accent-strong); font-size:10px; line-height:1.5; font-weight:600; }
+
+    .drawer-backdrop { position:fixed; inset:0; background:rgba(4,10,8,.54); opacity:0; pointer-events:none; transition:.2s; z-index:40; }
+    .drawer-backdrop.open { opacity:1; pointer-events:auto; }
+    .drawer { position:fixed; top:0; right:0; bottom:0; width:min(430px,100%); background:var(--surface); transform:translateX(105%); transition:.25s ease; z-index:41; padding:24px; overflow:auto; box-shadow:-20px 0 70px rgba(0,0,0,.25); }
+    .drawer.open { transform:none; }
+    .drawer-head { display:flex; justify-content:space-between; gap:20px; align-items:center; margin-bottom:28px; }
+    .drawer-head span { color:var(--muted); font-size:11px; font-weight:700; }
+    .drawer h2 { font-size:25px; letter-spacing:-.03em; margin:0 0 12px; }
+    .drawer > p { color:var(--muted); font-size:13px; line-height:1.65; }
+    .drawer-section { margin-top:24px; padding-top:19px; border-top:1px solid var(--line); }
+    .drawer-section h3 { margin:0 0 12px; font-size:13px; }
+    .check-line { display:grid; grid-template-columns:18px minmax(0,1fr); gap:9px; color:var(--muted); font-size:12px; line-height:1.45; margin:9px 0; }
+    .check-line svg { color:var(--accent); width:16px; height:16px; margin-top:1px; }
+
+    .toast { position:fixed; left:50%; bottom:26px; transform:translate(-50%,16px); background:var(--ink); color:var(--surface); padding:10px 14px; border-radius:10px; font-size:12px; font-weight:600; opacity:0; pointer-events:none; transition:.2s; z-index:60; }
+    .toast.show { opacity:1; transform:translate(-50%,0); }
+    .mobile-nav { display:none; }
+
+    @media (max-width: 980px) {
+      :root { --sidebar: 84px; }
+      .rail { padding:22px 12px; align-items:center; }
+      .rail-status { padding:2px 0 24px; }
+      .rail-status > div:last-child, .nav-btn > span:not(.count), .mode-card { display:none; }
+      .nav-btn { width:52px; height:48px; justify-content:center; padding:0; position:relative; }
+      .nav-btn .count { position:absolute; right:-2px; top:-3px; min-width:17px; padding:1px 4px; }
+      .today-grid, .chat-layout, .brief-grid, .market-grid, .source-hub { grid-template-columns:1fr; }
+      .stack, .quick-strip { grid-template-columns:repeat(2,1fr); }
+      .system-card { grid-column:1/-1; }
+      .task-board { grid-template-columns:1fr; }
+      .task-column { min-height:0; }
+    }
+
+    @media (max-width: 700px) {
+      .app { display:block; }
+      .rail { display:none; }
+      .main { padding:24px 15px calc(150px + env(safe-area-inset-bottom)); }
+      .topbar { margin-bottom:22px; align-items:center; }
+      .top-actions .proto-badge { display:none; }
+      h1 { font-size:29px; }
+      .today-grid, .quick-strip, .stack { grid-template-columns:1fr; }
+      .lead-card { min-height:0; padding:24px 20px; border-radius:20px; }
+      .lead-card h2 { font-size:24px; }
+      .quick-strip { gap:9px; }
+      .today-grid .mini-card .task-list .task-row:nth-child(n+2) { display:none; }
+      .system-card { display:none; }
+      .app-card { display:grid; grid-template-columns:minmax(118px,1fr) auto; align-items:center; gap:8px; padding:14px 16px; }
+      .app-card .card-head { margin:0; }
+      .app-card .card-head .text-btn, .app-card-foot { display:none; }
+      .app-card-grid { grid-template-columns:repeat(3,42px); gap:6px; }
+      .app-launcher { width:42px; height:42px; padding:0; }
+      .app-launcher span { position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap; }
+      .drawer, .drawer-backdrop { transition:none; }
+      .quick-card { min-height:auto; display:grid; grid-template-columns:30px 1fr; column-gap:10px; padding:14px; }
+      .quick-card svg { margin:0; grid-row:1/3; }
+      .chat-panel { min-height:calc(100vh - 175px); border-radius:18px; }
+      .chat-toolbar { align-items:flex-start; }
+      .personas { max-width:180px; }
+      .messages { padding:17px 13px; }
+      .message.me { max-width:88%; }
+      .protocol-card { border-radius:18px; }
+      .task-board { gap:11px; }
+      .task-column { border-radius:18px; }
+      .brief-grid, .market-grid { gap:11px; }
+      .movers-head { display:block; padding:19px 17px 15px; }
+      .source-tabs { justify-content:flex-start; margin-top:14px; }
+      .movers-columns { grid-template-columns:38px minmax(0,1fr) 70px; padding:10px 16px; }
+      .movers-columns span:nth-child(3) { display:none; }
+      .feed-empty { padding:30px 18px 28px; }
+      .watch-snapshot { align-items:flex-start; }
+      .data-strip { grid-template-columns:1fr 1fr; }
+      .datum:last-child { grid-column:1/-1; }
+      .mobile-nav {
+        display:grid; grid-template-columns:repeat(5,1fr); position:fixed; z-index:30;
+        left:10px; right:10px; bottom:calc(10px + env(safe-area-inset-bottom));
+        background:color-mix(in srgb, var(--surface) 94%, transparent); border:1px solid var(--line);
+        border-radius:19px; padding:7px; box-shadow:var(--shadow);
+      }
+      .mobile-nav .nav-btn { width:auto; height:50px; padding:5px 2px; display:flex; flex-direction:column; gap:3px; justify-content:center; font-size:9px; border-radius:13px; }
+      .mobile-nav .nav-btn svg { width:18px; height:18px; }
+      .mobile-nav .nav-btn > span:not(.count) { display:block; }
+      .mobile-nav .nav-btn .count { display:none; }
+      .toast { bottom:calc(88px + env(safe-area-inset-bottom)); width:max-content; max-width:calc(100% - 32px); text-align:center; }
+    }
+  
+    .filehidden { position:absolute; width:1px; height:1px; opacity:0; pointer-events:none; }
+    #log { overflow-y:auto; max-height:52vh; }
+    #log .msg { max-width:92%; padding:10px 12px; border-radius:16px; line-height:1.45; font-size:14px; }
+    #log .msg.me { margin-left:auto; background:var(--accent-soft); }
+    #log .msg.grok, #log .msg.gemini, #log .msg.ace { background:var(--surface-2); border:1px solid var(--line); }
+    #status.on { color:var(--accent-strong); }
+    #input { width:100%; border:0; background:transparent; color:inherit; font:inherit; outline:none; }
+    #send:disabled { opacity:.4; }
+
+  </style>
 </head>
 <body>
-<header>
-  <span class="spade">♠️</span><h1>Shavor's Desk</h1>
-  <span id="status">connecting…</span>
-  <button id="speakBtn" class="iconbtn" title="Read new messages aloud">🔇</button>
-  <button id="micBtn" class="iconbtn" title="Dictate your message">🎤</button>
-</header>
-<div id="desk">loading desk context…</div>
-<div id="log"></div>
-<div id="bar">
-  <label class="toggle" title="Each model reacts to the other's take before the round closes">
-    <input type="checkbox" id="xtalk"> <span>cross-talk</span>
-  </label>
-  <label class="toggle" title="Rail and Anchor brief Ace privately — you get one synthesized answer">
-    <input type="checkbox" id="funnel" checked> <span>one answer</span>
-  </label>
-  <input id="input" placeholder="What's on your mind, Shavor?…" autocomplete="off">
-  <label for="fileInput" id="attachBtn" class="iconbtn" title="Send a photo or video">📎</label>
-  <input type="file" id="fileInput" accept="image/*,video/*" class="filehidden">
-  <button id="send">Send</button>
-</div>
+  <div class="app">
+    <aside class="rail" aria-label="Primary navigation">
+      <div class="rail-status">
+        <div class="status-ace" aria-hidden="true">
+          <svg viewBox="0 0 34 38" role="img">
+            <rect x="1" y="1" width="32" height="36" rx="8" fill="var(--surface-2)" stroke="currentColor" stroke-width="1.5"/>
+            <path d="M17 8.1c-2.1 3.7-7.7 6.5-7.7 11.3 0 2.8 2.1 4.7 4.6 4.7 1.1 0 2.1-.4 2.8-1.1-.2 2.5-1.1 4.1-3.2 5.7h7c-2.1-1.6-3-3.2-3.2-5.7.7.7 1.7 1.1 2.8 1.1 2.5 0 4.6-1.9 4.6-4.7 0-4.8-5.6-7.6-7.7-11.3Z" fill="currentColor"/>
+            <path d="M6.1 7.5 7.6 4l1.5 3.5M6.7 6.2h1.8" fill="none" stroke="currentColor" stroke-width="1.1" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </div>
+        <div><strong>Desk connected</strong><small><i class="live-dot"></i><span id="status">connecting…</span></small></div>
+      </div>
+      <nav class="nav-list">
+        <button class="nav-btn active" data-view="today"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 13h6V4H4v9Zm10 7h6V11h-6v9ZM4 20h6v-3H4v3Zm10-13h6V4h-6v3Z"/></svg><span>Today</span></button>
+        <button class="nav-btn" data-view="market"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 18 9 13l3 3 7-9"/><path d="M14 7h5v5"/><path d="M4 4v16h16"/></svg><span>Gainers</span></button>
+        <button class="nav-btn" data-view="chat"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4v8Z"/><path d="M8 9h8M8 13h5"/></svg><span>Chat</span></button>
+        <button class="nav-btn" data-view="tasks"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m9 11 2 2 4-5"/><path d="M19 12a7 7 0 1 1-4.1-6.37"/></svg><span>Tasks</span><span class="count">3</span></button>
+        <button class="nav-btn" data-view="briefing"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 19.5V5a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v14.5"/><path d="M8 7h8M8 11h8M8 15h5M2 19h20"/></svg><span>Briefing</span><span class="count">3</span></button>
+      </nav>
+      <div class="rail-foot">
+        <div class="mode-card">
+          <div class="mode-row"><strong>One answer</strong><button class="switch mode-switch" role="switch" aria-checked="true" aria-label="Toggle one-answer mode"></button></div>
+          <p>Rail and Anchor brief Ace privately. You receive one decision-ready response.</p>
+        </div>
+      </div>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <div><p class="eyebrow" id="viewEyebrow">Tuesday evening · Sep 29</p><h1 id="viewTitle">Good evening, Shavor</h1></div>
+        <div class="top-actions">
+          <span class="proto-badge"><span class="live-dot"></span>Interactive prototype</span>
+          <button class="icon-btn" id="infoBtn" aria-label="Open redesign notes"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7.5h.01"/></svg></button>
+        </div>
+      </header>
+
+      <section class="view active" id="todayView" aria-label="Today">
+        <div class="today-grid">
+          <article class="card lead-card">
+            <p class="section-label" id="answerLabel">DESK ANSWER · WAITING</p>
+            <h2 id="answerTitle">Ask in Chat. You get one answer back.</h2>
+            <p id="answerBody">Rail and Anchor brief Ace privately. The latest answer lands here and in the conversation.</p>
+            <div class="answer-meta"><span class="voice-pill warm"><i></i>Rail briefed</span><span class="voice-pill blue"><i></i>Anchor briefed</span><span class="voice-pill"><i></i>Ace synthesized</span></div>
+            <div class="card-actions"><button class="primary-btn" data-go="chat">Open conversation</button><button class="ghost-btn" id="showSourcesToday">See source takes</button></div>
+          </article>
+          <div class="stack">
+            <article class="card mini-card">
+              <div class="card-head"><h3>Build progress</h3><button class="text-btn" data-go="tasks">All tasks</button></div>
+              <div class="metric-row"><span>Android refresh</span><strong>1 of 3</strong></div>
+              <div class="progress" aria-label="One of three build tasks ready"><span style="width:33%"></span></div>
+              <div class="task-list">
+                <button class="task-row" data-task="media"><span class="task-marker green"></span><span class="task-copy"><strong>Photo + video code</strong><small>Merged on main</small></span><span class="task-arrow">›</span></button>
+                <button class="task-row" data-task="voice"><span class="task-marker"></span><span class="task-copy"><strong>Finish PR #2</strong><small>Voice + microphone</small></span><span class="task-arrow">›</span></button>
+                <button class="task-row" data-task="pipeline"><span class="task-marker"></span><span class="task-copy"><strong>Add APK workflow</strong><small>Build on every main push</small></span><span class="task-arrow">›</span></button>
+              </div>
+            </article>
+            <article class="card app-card">
+              <div class="card-head"><h3>Connected apps</h3><button class="text-btn" id="manageAppsBtn">Manage</button></div>
+              <div class="app-card-grid">
+                <button class="app-launcher" data-app-shortcut="YouTube" aria-label="View YouTube feed integration"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="6" width="18" height="12" rx="4"/><path d="m10 9 5 3-5 3V9Z" fill="currentColor" stroke="none"/></svg><span>YouTube</span></button>
+                <button class="app-launcher" data-app-shortcut="Facebook" aria-label="View Facebook feed integration"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M13.7 21v-8h2.7l.4-3.1h-3.1v-2c0-.9.3-1.5 1.6-1.5H17V3.6c-.3 0-1.3-.1-2.5-.1-2.5 0-4.2 1.5-4.2 4.3v2.1H7.5V13h2.8v8h3.4Z"/></svg><span>Facebook</span></button>
+                <button class="app-launcher" data-app-shortcut="Snapchat" aria-label="View Snapchat feed integration"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M12 3.4c-2.5 0-4.1 2-4.1 4.6 0 .5.1 1.1.1 1.6-.4.2-1 .1-1.4-.1-.5-.2-.9.6-.3 1 .6.4 1.3.5 1.7.8-.2.8-.9 2.2-2.8 3-.6.3-.4 1.1.2 1.2.7.1 1.1.4 1.3 1 .2.4.6.6 1 .5.9-.2 1.5.3 2.1.7.6.4 1.2.8 2.2.8s1.6-.4 2.2-.8c.6-.4 1.2-.9 2.1-.7.4.1.8-.1 1-.5.2-.6.6-.9 1.3-1 .6-.1.8-.9.2-1.2-1.9-.8-2.6-2.2-2.8-3 .4-.3 1.1-.4 1.7-.8.6-.4.2-1.2-.3-1-.4.2-1 .3-1.4.1 0-.5.1-1.1.1-1.6 0-2.6-1.6-4.6-4.1-4.6Z"/></svg><span>Snapchat</span></button>
+              </div>
+              <p class="app-card-foot">Choose which sources can appear in your unified feed.</p>
+            </article>
+            <article class="card mini-card system-card">
+              <div class="card-head"><h3>System snapshot</h3><span class="section-label" style="margin:0">SEP 29</span></div>
+              <div class="system-line"><span class="sys-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 17V7a3 3 0 0 1 3-3h10a3 3 0 0 1 3 3v10a3 3 0 0 1-3 3H7a3 3 0 0 1-3-3Z"/><path d="M8 8h8M8 12h5"/></svg></span><span>Railway backend</span><strong class="state">Healthy</strong></div>
+              <div class="system-line"><span class="sys-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 2h8a2 2 0 0 1 2 2v16a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2Z"/><path d="M10 18h4"/></svg></span><span>Fresh Android APK</span><strong class="state warn">Blocked</strong></div>
+            </article>
+          </div>
+        </div>
+        <div class="quick-strip">
+          <button class="quick-card" data-go="tasks"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M9 5h10M9 12h10M9 19h10"/><path d="m3 5 1 1 2-2M3 12l1 1 2-2M3 19l1 1 2-2"/></svg><strong>Open task board</strong><span>Build, test, and handoff work in one place.</span></button>
+          <button class="quick-card" data-go="market"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 18 9 13l3 3 7-9"/><path d="M14 7h5v5"/><path d="M4 4v16h16"/></svg><strong>Scan top gainers</strong><span>Moomoo, Webull, or a combined ranked feed.</span></button>
+          <button class="quick-card" data-go="briefing"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 19V9M10 19V5M16 19v-7M22 19H2"/></svg><strong>Read desk briefing</strong><span>Market, system, and learning lanes.</span></button>
+          <button class="quick-card" id="protocolBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="6" cy="12" r="3"/><circle cx="18" cy="6" r="3"/><circle cx="18" cy="18" r="3"/><path d="m8.7 10.7 6.6-3.4M8.7 13.3l6.6 3.4"/></svg><strong>Improve the protocol</strong><span>See the communication design and handoff rules.</span></button>
+        </div>
+      </section>
+
+      <section class="view" id="marketView" aria-label="Top gainers">
+        <p class="page-intro">A dedicated market lane keeps fast movers out of the conversation until they pass your liquidity, catalyst, and risk filters.</p>
+        <div class="market-grid">
+          <article class="card movers-card">
+            <div class="movers-head">
+              <div><h2>Top gainers</h2><p id="feedSubtitle">Combined broker ranking · regular and extended hours</p></div>
+              <div class="source-tabs" aria-label="Gainer feed source">
+                <button class="source-tab active" data-source="combined">Combined</button>
+                <button class="source-tab" data-source="moomoo">Moomoo</button>
+                <button class="source-tab" data-source="webull">Webull</button>
+              </div>
+            </div>
+            <div class="movers-columns" aria-hidden="true"><span>RANK</span><span>SYMBOL</span><span>LAST</span><span>CHANGE</span></div>
+            <div class="feed-empty">
+              <div class="feed-empty-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 18 9 13l3 3 7-9"/><path d="M14 7h5v5"/></svg></div>
+              <h3 id="feedEmptyTitle">Connect a market-data feed</h3>
+              <p id="feedEmptyText">This prototype does not invent live rankings. The production app can populate this list through a server-side market-data or broker connection.</p>
+              <span class="feed-status"><i></i><span id="feedStatusText">Combined feed not connected</span></span>
+            </div>
+          </article>
+          <aside class="card integration-card">
+            <h3>What the live list can show</h3>
+            <p>Rank the same movers your broker surfaces, then narrow them to your desk rules before they reach chat.</p>
+            <div class="feed-feature"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 6h16M7 12h10M10 18h4"/></svg><div><strong>Fast filters</strong><span>Session, price, float, relative volume, percent change, and halt status.</span></div></div>
+            <div class="feed-feature"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg><div><strong>Clear freshness</strong><span>Every row should display its market session and last-updated time.</span></div></div>
+            <div class="feed-feature"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M5 20V10M12 20V4M19 20v-7"/></svg><div><strong>Desk handoff</strong><span>Tap a symbol to send price action and catalyst context into one-answer mode.</span></div></div>
+          </aside>
+        </div>
+        <article class="card watch-snapshot">
+          <div><small>WATCHLIST</small><strong>No live quote on this screen</strong></div>
+          <div class="watch-price"><b>Gainers stay empty until a feed is connected</b><span>Prices in Chat come from the room, not from this list.</span></div>
+        </article>
+      </section>
+
+      <section class="view" id="chatView" aria-label="Chat">
+        <div class="chat-layout">
+          <article class="card chat-panel">
+            <div class="chat-toolbar">
+              <div class="personas" aria-label="Message filters"><button class="filter-chip active" data-filter="all">All</button><button class="filter-chip" data-filter="ace">Ace</button><button class="filter-chip" data-filter="rail">Rail</button><button class="filter-chip" data-filter="anchor">Anchor</button></div>
+              <label class="mode-inline">One answer <button class="switch mode-switch" role="switch" aria-checked="true" aria-label="Toggle one-answer mode"></button></label>
+            </div>
+            <div class="messages" id="log"></div>
+            <div class="composer">
+              <div class="compose-box"><input id="input" aria-label="Message the desk" placeholder="What's on your mind, Shavor?…" autocomplete="off"/><div class="compose-tools"><div class="toolset"><label for="fileInput" id="attachBtn" class="mini-icon" aria-label="Attach a photo or video"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m21.4 11.6-8.9 8.9a6 6 0 0 1-8.5-8.5l9.2-9.2a4 4 0 0 1 5.7 5.7l-9.2 9.2a2 2 0 0 1-2.8-2.8l8.5-8.5"/></svg></label><input type="file" id="fileInput" accept="image/*,video/*" class="filehidden"><button type="button" id="micBtn" class="mini-icon" aria-label="Dictate">🎤</button><button type="button" id="speakBtn" class="mini-icon" aria-label="Read new messages aloud">🔇</button><input type="checkbox" id="funnel" checked class="filehidden"><input type="checkbox" id="xtalk" class="filehidden"><span class="draft-note" id="desk">One answer is on</span></div><button class="send-demo" id="send" type="button" aria-label="Send"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/></svg></button></div></div>
+            </div>
+          </article>
+          <aside class="card protocol-card">
+            <div class="card-head"><h3>Communication protocol</h3><span class="section-label" style="margin:0">V2</span></div>
+            <p>Less cross-talk, more context, and one clearly owned final answer.</p>
+            <div class="protocol-step"><span class="step-num">01</span><div><strong>Classify the message</strong><span>Question, task, update, or decision. Route only to the voices needed.</span></div></div>
+            <div class="protocol-step"><span class="step-num">02</span><div><strong>Share one context packet</strong><span>Goal, live constraints, recent decisions, attachments, and the exact ask.</span></div></div>
+            <div class="protocol-step"><span class="step-num">03</span><div><strong>Parallel private takes</strong><span>Rail and Anchor respond backstage, independently, with confidence and evidence.</span></div></div>
+            <div class="protocol-step"><span class="step-num">04</span><div><strong>Ace resolves conflicts</strong><span>One answer states consensus, disagreement, assumptions, and next action.</span></div></div>
+            <div class="protocol-step"><span class="step-num">05</span><div><strong>Close the loop</strong><span>Capture the decision, owner, due point, and what would change the answer.</span></div></div>
+          </aside>
+        </div>
+      </section>
+
+      <section class="view" id="tasksView" aria-label="Tasks">
+        <p class="page-intro">A lightweight task layer keeps builds, research, and decisions attached to the conversation that created them—without turning the room into a stream of status messages.</p>
+        <div class="task-board">
+          <section class="task-column"><div class="column-head"><strong>Next</strong><span>2</span></div>
+            <button class="task-tile" data-task="voice"><span class="tag orange">ANDROID</span><h3>Finish and merge PR #2</h3><p>Review native speaker and mic behavior, run device checks, then squash merge.</p><footer><span>Build lane</span><span class="owners"><i class="owner">A</i></span></footer></button>
+            <button class="task-tile" data-task="handoff"><span class="tag">CURSOR HANDOFF</span><h3>Apply redesign to production app</h3><p>Translate this information architecture and component set into the Android shell and room UI.</p><footer><span>Design lane</span><span class="owners"><i class="owner">A</i><i class="owner rail">C</i></span></footer></button>
+          </section>
+          <section class="task-column"><div class="column-head"><strong>In progress</strong><span>1</span></div>
+            <button class="task-tile" data-task="pipeline"><span class="tag orange">BUILD</span><h3>Add APK delivery workflow</h3><p>Build on every push to main and upload the debug APK as a downloadable artifact.</p><footer><span>Release lane</span><span class="owners"><i class="owner rail">C</i></span></footer></button>
+          </section>
+          <section class="task-column"><div class="column-head"><strong>Ready to verify</strong><span>2</span></div>
+            <button class="task-tile" data-task="media"><span class="tag">MERGED</span><h3>Photo and video support</h3><p>Code is on main; verify camera, gallery, and video after the fresh APK is installed.</p><footer><span>On-device test</span><span class="owners"><i class="owner">S</i></span></footer></button>
+            <button class="task-tile" data-task="funnel"><span class="tag">ROOM</span><h3>One-answer funnel</h3><p>Confirm the updated room loads, is on by default, and produces one synthesized reply.</p><footer><span>Room test</span><span class="owners"><i class="owner">S</i><i class="owner anchor">A</i></span></footer></button>
+          </section>
+        </div>
+      </section>
+
+      <section class="view" id="briefingView" aria-label="Briefing">
+        <div class="brief-controls" role="tablist"><button class="brief-tab active" data-brief="market">Market desk</button><button class="brief-tab" data-brief="system">System</button><button class="brief-tab" data-brief="learning">Learning</button><button class="brief-tab" data-brief="apps">Apps &amp; Bluetooth</button></div>
+        <div class="brief-page active" id="marketBrief">
+          <div class="brief-grid">
+            <article class="card brief-hero"><span class="stamp">MARKET DESK</span><h2>The live answer is in Chat, not a saved snapshot.</h2><p>This lane is the layout for a briefing. It does not invent a book, a close, or an order.</p></article>
+            <div class="insight-list"><article class="card insight"><strong>One answer</strong><p>Rail and Anchor brief Ace privately. You get a single reply in Chat and on Today.</p></article><article class="card insight"><strong>No feed yet</strong><p>Gainers stay empty until a market-data connection is added. Nothing here is a quote.</p></article><article class="card insight"><strong>Orders</strong><p>This page does not place, change, or cancel a trade.</p></article></div>
+          </div>
+        </div>
+        <div class="brief-page" id="systemBrief">
+          <div class="news-list"><article class="card news-item"><div class="news-date"><b>29</b><span>SEP</span></div><div><h3>Backend diagnostics passed</h3><p>Railway room, memory, and uploads were responding in the latest reported check.</p></div></article><article class="card news-item"><div class="news-date"><b>29</b><span>SEP</span></div><div><h3>APK pipeline is the release blocker</h3><p>The repository had no GitHub Actions workflow, so merged changes were not reaching a downloadable Android build.</p></div></article><article class="card news-item"><div class="news-date"><b>29</b><span>SEP</span></div><div><h3>Voice work awaits merge</h3><p>PR #2 includes native speaker and microphone work but still needs build testing and merge.</p></div></article></div>
+        </div>
+        <div class="brief-page" id="learningBrief">
+          <div class="brief-grid"><article class="card brief-hero"><span class="stamp">PLAYBOOK NOTE</span><h2>Separate research, debate, decision, and execution.</h2><p>Each phase should produce a distinct artifact: source takes, a synthesized answer, an explicit owner, and a verification result. This keeps the desk fast without losing disagreement or evidence.</p><div class="card-actions"><button class="primary-btn" id="openProtocolFromBrief">Open protocol details</button></div></article><div class="insight-list"><article class="card insight"><strong>Confidence labels</strong><p>Each private take should report confidence and identify the single fact most likely to change it.</p></article><article class="card insight"><strong>Context receipts</strong><p>Show which attachments, prices, rules, and recent decisions were included in the prompt.</p></article><article class="card insight"><strong>Decision memory</strong><p>Save final decisions separately from chat history so old conversation cannot silently override them.</p></article></div></div>
+        </div>
+        <div class="brief-page" id="appsBrief">
+          <div class="source-hub">
+            <article class="card source-panel">
+              <h2>Feed sources</h2>
+              <p>Choose a source to preview how its posts and videos would enter the desk feed.</p>
+              <div class="source-list">
+                <div class="source-row"><span class="source-id"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="6" width="18" height="12" rx="4"/><path d="m10 9 5 3-5 3V9Z" fill="currentColor" stroke="none"/></svg></span><span class="source-copy"><strong>YouTube</strong><span>Videos, channel updates, and links shared into the room</span></span><span class="source-action"><button class="ghost-btn app-preview" data-app="YouTube">Open</button><small>PROTOTYPE</small></span></div>
+                <div class="source-row"><span class="source-id"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M13.7 21v-8h2.7l.4-3.1h-3.1v-2c0-.9.3-1.5 1.6-1.5H17V3.6c-.3 0-1.3-.1-2.5-.1-2.5 0-4.2 1.5-4.2 4.3v2.1H7.5V13h2.8v8h3.4Z"/></svg></span><span class="source-copy"><strong>Facebook</strong><span>Selected posts, pages, and shared links</span></span><span class="source-action"><button class="ghost-btn app-preview" data-app="Facebook">Open</button><small>PROTOTYPE</small></span></div>
+                <div class="source-row"><span class="source-id"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M12 3.4c-2.5 0-4.1 2-4.1 4.6 0 .5.1 1.1.1 1.6-.4.2-1 .1-1.4-.1-.5-.2-.9.6-.3 1 .6.4 1.3.5 1.7.8-.2.8-.9 2.2-2.8 3-.6.3-.4 1.1.2 1.2.7.1 1.1.4 1.3 1 .2.4.6.6 1 .5.9-.2 1.5.3 2.1.7.6.4 1.2.8 2.2.8s1.6-.4 2.2-.8c.6-.4 1.2-.9 2.1-.7.4.1.8-.1 1-.5.2-.6.6-.9 1.3-1 .6-.1.8-.9.2-1.2-1.9-.8-2.6-2.2-2.8-3 .4-.3 1.1-.4 1.7-.8.6-.4.2-1.2-.3-1-.4.2-1 .3-1.4.1 0-.5.1-1.1.1-1.6 0-2.6-1.6-4.6-4.1-4.6Z"/></svg></span><span class="source-copy"><strong>Snapchat</strong><span>Shared Spotlight clips and story links</span></span><span class="source-action"><button class="ghost-btn app-preview" data-app="Snapchat">Open</button><small>PROTOTYPE</small></span></div>
+              </div>
+              <div class="source-summary" id="sourceSummary"><strong>No source selected.</strong> A production connection is required before account content can appear here.</div>
+            </article>
+            <aside class="card bluetooth-panel">
+              <h3>Bluetooth</h3>
+              <p>A quick control for the native Android app’s nearby audio devices.</p>
+              <div class="bluetooth-control"><div><strong id="bluetoothState">Bluetooth off</strong><span>Phone setting not connected in this prototype</span></div><button class="switch" id="bluetoothSwitch" role="switch" aria-checked="false" aria-label="Preview Bluetooth on or off"></button></div>
+              <div class="bluetooth-note">The production Android build needs a native permission bridge to read or change Bluetooth. This control demonstrates the intended placement without claiming to change the phone setting.</div>
+            </aside>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <nav class="mobile-nav" aria-label="Mobile navigation">
+    <button class="nav-btn active" data-view="today"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 13h6V4H4v9Zm10 7h6V11h-6v9ZM4 20h6v-3H4v3Zm10-13h6V4h-6v3Z"/></svg><span>Today</span></button>
+    <button class="nav-btn" data-view="market"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 18 9 13l3 3 7-9"/><path d="M14 7h5v5"/><path d="M4 4v16h16"/></svg><span>Gainers</span></button>
+    <button class="nav-btn" data-view="chat"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4v8Z"/></svg><span>Chat</span></button>
+    <button class="nav-btn" data-view="tasks"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m9 11 2 2 4-5"/><path d="M19 12a7 7 0 1 1-4.1-6.37"/></svg><span>Tasks</span></button>
+    <button class="nav-btn" data-view="briefing"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 19.5V5a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v14.5"/><path d="M8 7h8M8 11h8M8 15h5M2 19h20"/></svg><span>Briefing</span></button>
+  </nav>
+
+  <div class="drawer-backdrop" id="backdrop"></div>
+  <aside class="drawer" id="drawer" aria-hidden="true" aria-label="Details panel">
+    <div class="drawer-head"><span id="drawerKicker">TASK DETAIL</span><button class="icon-btn" id="closeDrawer" aria-label="Close details"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m6 6 12 12M18 6 6 18"/></svg></button></div>
+    <h2 id="drawerTitle">Finish and merge PR #2</h2>
+    <p id="drawerText">Review and test the native voice work before it enters the main branch.</p>
+    <div id="drawerBody"></div>
+  </aside>
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+  <script>
+    (function(){
+      var titles = {
+        today: ["Tuesday evening · Sep 29", "Good evening, Shavor"],
+        market: ["Broker-ranked movers", "Market scan"],
+        chat: ["One room · three perspectives", "Desk conversation"],
+        tasks: ["Build, verify, hand off", "Tasks"],
+        briefing: ["Tap into the lanes that matter", "Briefing"]
+      };
+      var views = document.querySelectorAll('.view');
+      var navs = document.querySelectorAll('[data-view]');
+      var toastTimer;
+
+      function showToast(text){
+        var toast = document.getElementById('toast');
+        toast.textContent = text; toast.classList.add('show');
+        clearTimeout(toastTimer); toastTimer = setTimeout(function(){ toast.classList.remove('show'); }, 2300);
+      }
+      function switchView(name){
+        views.forEach(function(v){ v.classList.toggle('active', v.id === name + 'View'); });
+        navs.forEach(function(n){ n.classList.toggle('active', n.dataset.view === name); });
+        document.getElementById('viewEyebrow').textContent = titles[name][0];
+        document.getElementById('viewTitle').textContent = titles[name][1];
+        window.scrollTo({top:0, behavior:'smooth'});
+      }
+      navs.forEach(function(btn){ btn.addEventListener('click', function(){ switchView(btn.dataset.view); }); });
+      document.querySelectorAll('[data-go]').forEach(function(btn){ btn.addEventListener('click', function(){ switchView(btn.dataset.go); }); });
+
+      var feedCopy = {
+        combined: ['Combined broker ranking · regular and extended hours', 'Combined feed not connected', 'The production app can merge Moomoo and Webull movers, remove duplicate symbols, and preserve each venue’s session data.'],
+        moomoo: ['Moomoo ranking · regular and extended hours', 'Moomoo feed not connected', 'A production broker or market-data connection is required before Moomoo-ranked movers can appear here.'],
+        webull: ['Webull ranking · regular and extended hours', 'Webull feed not connected', 'A production broker or market-data connection is required before Webull-ranked movers can appear here.']
+      };
+      document.querySelectorAll('.source-tab').forEach(function(tab){ tab.addEventListener('click', function(){
+        document.querySelectorAll('.source-tab').forEach(function(t){ t.classList.remove('active'); });
+        tab.classList.add('active');
+        var copy = feedCopy[tab.dataset.source];
+        document.getElementById('feedSubtitle').textContent = copy[0];
+        document.getElementById('feedStatusText').textContent = copy[1];
+        document.getElementById('feedEmptyText').textContent = copy[2];
+      }); });
+
+      document.querySelectorAll('.mode-switch').forEach(function(sw){
+        sw.addEventListener('click', function(){
+          var next = sw.getAttribute('aria-checked') !== 'true';
+          document.querySelectorAll('.mode-switch').forEach(function(other){ other.setAttribute('aria-checked', String(next)); });
+          showToast(next ? 'One-answer routing on' : 'Roundtable preview on');
+        });
+      });
+
+      document.querySelectorAll('.source-toggle').forEach(function(btn){ btn.addEventListener('click', function(){
+        var box = btn.nextElementSibling; box.classList.toggle('open'); btn.textContent = box.classList.contains('open') ? 'Hide private source takes' : 'Show private source takes';
+      }); });
+      document.getElementById('showSourcesToday').addEventListener('click', function(){ switchView('chat'); setTimeout(function(){ document.querySelector('.source-toggle').click(); }, 80); });
+
+      document.querySelectorAll('.filter-chip').forEach(function(chip){ chip.addEventListener('click', function(){
+        document.querySelectorAll('.filter-chip').forEach(function(c){ c.classList.remove('active'); }); chip.classList.add('active');
+        var filter = chip.dataset.filter;
+        document.querySelectorAll('.message').forEach(function(m){ m.style.display = (filter === 'all' || m.dataset.speaker === filter || m.dataset.speaker === 'me' || ((filter === 'rail' || filter === 'anchor') && m.dataset.speaker === 'ace')) ? 'grid' : 'none'; });
+        if(filter === 'rail' || filter === 'anchor') { document.querySelector('.source-takes').classList.add('open'); document.querySelector('.source-toggle').textContent = 'Hide private source takes'; showToast('Private take revealed inside Ace’s answer'); }
+      }); });
+
+      function selectBrief(name){
+        document.querySelectorAll('.brief-tab').forEach(function(t){ t.classList.toggle('active', t.dataset.brief === name); });
+        document.querySelectorAll('.brief-page').forEach(function(p){ p.classList.toggle('active', p.id === name + 'Brief'); });
+      }
+      document.querySelectorAll('.brief-tab').forEach(function(tab){ tab.addEventListener('click', function(){ selectBrief(tab.dataset.brief); }); });
+      function openApps(name){
+        switchView('briefing'); selectBrief('apps');
+        if(name){
+          document.getElementById('sourceSummary').innerHTML = '<strong>'+name+' selected.</strong> Account content is not connected in this static prototype; the native app will open this source in the unified feed after authorization.';
+          showToast(name + ' feed selected');
+        }
+      }
+      document.getElementById('manageAppsBtn').addEventListener('click', function(){ openApps(); });
+      document.querySelectorAll('[data-app-shortcut]').forEach(function(btn){ btn.addEventListener('click', function(){ openApps(btn.dataset.appShortcut); }); });
+      document.querySelectorAll('.app-preview').forEach(function(btn){ btn.addEventListener('click', function(){
+        document.getElementById('sourceSummary').innerHTML = '<strong>'+btn.dataset.app+' selected.</strong> Account content is not connected in this static prototype; the native app will open this source in the unified feed after authorization.';
+        showToast(btn.dataset.app + ' feed preview opened');
+      }); });
+      document.getElementById('bluetoothSwitch').addEventListener('click', function(){
+        var next = this.getAttribute('aria-checked') !== 'true';
+        this.setAttribute('aria-checked', String(next));
+        document.getElementById('bluetoothState').textContent = next ? 'Bluetooth on · preview' : 'Bluetooth off';
+        showToast(next ? 'Bluetooth control preview on' : 'Bluetooth control preview off');
+      });
+
+      var details = {
+        voice: {k:'ANDROID TASK', t:'Finish and merge PR #2', p:'Review and test the native speaker and microphone work before it enters the main branch.', steps:['Mark PR #2 ready for review.','Confirm RECORD_AUDIO permission and denial handling.','Test speech-to-text lands in the composer before sending.','Test text-to-speech persona pitch and rate.','Push fixes, then squash merge into main.']},
+        pipeline: {k:'RELEASE TASK', t:'Add APK delivery workflow', p:'Create the missing build path so merged Android changes reach Shavor’s phone.', steps:['Add a GitHub Actions workflow for pushes to main.','Set up the Android JDK and Gradle cache.','Run the debug assemble task.','Upload the APK as a named build artifact.','Verify the downloaded APK installs and launches.']},
+        handoff: {k:'CURSOR HANDOFF', t:'Apply the redesign to production', p:'Use this prototype as the visual and interaction specification for the real Android shell and room UI.', steps:['Implement Today, Chat, Tasks, and Briefing destinations.','Keep One Answer enabled by default.','Add context receipts and confidence fields to backstage takes.','Attach tasks and decisions to their source conversation.','Preserve current native media, mic, and speaker capabilities.']},
+        media: {k:'VERIFY ON DEVICE', t:'Photo and video support', p:'The code is merged; the fresh APK must prove camera, gallery, and video work on the actual phone.', steps:['Take and attach a new photo.','Choose an existing gallery image.','Attach and preview a video.','Confirm large-file progress and failure states.']},
+        funnel: {k:'ROOM VERIFICATION', t:'One-answer funnel', p:'Confirm the new routing eliminates duplicate replies without hiding important disagreement.', steps:['Confirm the control is visible and enabled by default.','Send one question and expect one Ace reply.','Verify private Rail and Anchor takes are linked to that question.','Reveal sources on demand and confirm no second-round loop.']}
+      };
+      var drawer = document.getElementById('drawer'), backdrop = document.getElementById('backdrop');
+      function checkIcon(){ return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="m8 12 2.5 2.5L16 9"/></svg>'; }
+      function openDrawer(data){
+        document.getElementById('drawerKicker').textContent = data.k; document.getElementById('drawerTitle').textContent = data.t; document.getElementById('drawerText').textContent = data.p;
+        document.getElementById('drawerBody').innerHTML = '<div class="drawer-section"><h3>Acceptance steps</h3>' + data.steps.map(function(s){ return '<div class="check-line">'+checkIcon()+'<span>'+s+'</span></div>'; }).join('') + '</div>';
+        drawer.classList.add('open'); backdrop.classList.add('open'); drawer.setAttribute('aria-hidden','false');
+      }
+      function closeDrawer(){ drawer.classList.remove('open'); backdrop.classList.remove('open'); drawer.setAttribute('aria-hidden','true'); }
+      document.querySelectorAll('[data-task]').forEach(function(btn){ btn.addEventListener('click', function(){ openDrawer(details[btn.dataset.task]); }); });
+      document.getElementById('closeDrawer').addEventListener('click', closeDrawer); backdrop.addEventListener('click', closeDrawer);
+      document.addEventListener('keydown', function(e){ if(e.key === 'Escape') closeDrawer(); });
+
+      var protocol = {k:'COMMUNICATION DESIGN', t:'A faster, more informative desk', p:'The strongest improvement is not adding more messages—it is structuring how context, disagreement, and decisions move between the three voices.', steps:['Classify every inbound message before fan-out.','Send one canonical context packet with IDs for rules, attachments, and prior decisions.','Require each private take to include confidence, evidence, and a change-of-mind condition.','Have Ace merge overlap, surface real disagreement, and return one owned next action.','Store decisions and tasks separately from raw room history; show their source links in context.','Add delivery receipts: queued, provider replied, synthesis posted, and user acknowledged.']};
+      document.getElementById('protocolBtn').addEventListener('click', function(){ openDrawer(protocol); });
+      document.getElementById('openProtocolFromBrief').addEventListener('click', function(){ openDrawer(protocol); });
+      document.getElementById('infoBtn').addEventListener('click', function(){ openDrawer({k:'REDESIGN NOTES',t:'What this layout changes',p:'The room becomes one part of a broader command center instead of carrying every job in one endless thread.',steps:['Today gives one glanceable answer, task progress, and system health.','Chat keeps the main dialogue clean while preserving private source takes.','Tasks turn decisions into owned work with acceptance steps.','Briefing separates market, system, and learning information.','Desktop uses a quiet rail; mobile uses a thumb-friendly bottom bar.']}); });
+
+      document.querySelectorAll('.mode-switch').forEach(function(sw){
+        sw.addEventListener('click', function(){
+          var box = document.getElementById('funnel');
+          if(!box) return;
+          box.checked = !box.checked;
+          var on = box.checked;
+          document.querySelectorAll('.mode-switch').forEach(function(s){ s.setAttribute('aria-checked', on ? 'true' : 'false'); });
+          var note = document.getElementById('desk');
+          if(note) note.textContent = on ? 'One answer is on' : 'One answer is off';
+        });
+      });
+    })();
+  </script>
 <script>
+
 const qs = new URLSearchParams(location.search);
 let token = qs.get("token") || "";
 try {
@@ -325,15 +976,33 @@ function greeting(){
   const hr = new Date().getHours();
   return hr < 12 ? "Good morning" : hr < 17 ? "Good afternoon" : "Good evening";
 }
+function showAnswer(title, body){
+  var h = document.getElementById("answerTitle");
+  var p = document.getElementById("answerBody");
+  if(h && title) h.textContent = title;
+  if(p && body) p.textContent = body;
+}
+var _addMsg = addMsg;
+addMsg = function(who, text, round, ts, att){
+  var div = _addMsg(who, text, round, ts, att);
+  if(who==="ace" && text){
+    var line = text.split("\n")[0];
+    showAnswer(line.slice(0, 140), text);
+    var label = document.getElementById("answerLabel");
+    if(label) label.textContent = "DESK ANSWER · LIVE";
+  }
+  return div;
+};
 fetch("/api/desk?token="+encodeURIComponent(token)).then(r=>r.json()).then(d=>{
-  document.getElementById("desk").innerHTML =
-    `<span class="greet">${greeting()}, Shavor.</span><br>` +
-    `<b>Goal:</b> ${esc(d.goal||"")} &nbsp;·&nbsp; <b>GLND lock:</b> ${esc(d.glnd_lock||"")}<br>`+
-    `<b>Risk:</b> ${esc(d.risk||"")}<br><span>${esc(d.notes||"")}</span>`;
-}).catch(()=>{ document.getElementById("desk").textContent="desk context unavailable"; });
+  var note = document.getElementById("desk");
+  if(note) note.textContent = "One answer is on";
+  var title = document.getElementById("viewTitle");
+  if(title) title.textContent = greeting() + ", Shavor";
+}).catch(()=>{});
 
 sendBtn.disabled = true;
 connect();
+
 </script>
 </body>
 </html>
