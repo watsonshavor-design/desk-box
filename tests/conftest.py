@@ -19,6 +19,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 import app as app_module
+import market
 
 
 @pytest.fixture(scope="session")
@@ -32,6 +33,8 @@ def _reset_room(client):
     app_module.history.clear()
     app_module.store.wipe()
     app_module.thread_queues.clear()
+    market.use_loader("moomoo", None)
+    market.use_loader("webull", None)
     log_path = app_module.LOG_PATH
     if os.path.exists(log_path):
         os.remove(log_path)

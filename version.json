@@ -1,8 +1,8 @@
 {
   "name": "desk-box",
-  "backend": "1.6.0",
-  "frontend": "1.6.0",
+  "backend": "1.7.0",
+  "frontend": "1.7.0",
   "protocol": "2",
   "android": null,
-  "description": "Baseline before the command-center redesign. Room v4: funnel mode, shared memory, 14-day retention, photo and video uploads."
+  "description": "Desk tasks, sourced briefings, moomoo/Webull gainers, and connected-app states. One question still produces one Ace answer."
 }

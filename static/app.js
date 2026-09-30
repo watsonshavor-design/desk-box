@@ -1,6 +1,6 @@
 /* Desk command center. One-answer chat stays on the existing room socket. */
 (function () {
-  const ROUTES = ["home", "desk", "tasks", "briefings", "more"];
+  const ROUTES = ["home", "desk", "tasks", "briefings", "more", "apps"];
   const TASK_VIEWS = [
     ["today", "Today"],
     ["upcoming", "Upcoming"],
@@ -36,7 +36,14 @@
     speakOn: false,
     versionLabel: "",
     taskView: "today",
+    tasks: [],
+    briefings: [],
+    gainers: null,
+    gainerSource: "combined",
+    integrations: null,
+    undo: null,
     briefTab: "for_you",
+    routeArg: "",
     offline: !navigator.onLine,
   };
 
@@ -91,18 +98,31 @@
   }
 
   function routeFromHash() {
-    const name = (location.hash || "#/home").replace(/^#\/?/, "").split("?")[0];
+    const raw = (location.hash || "#/home").replace(/^#\/?/, "").split("?")[0];
+    const bits = raw.split("/").filter(Boolean);
+    const name = bits[0] || "home";
+    state.routeArg = bits[1] || "";
+    if (name === "apps") return "apps";
     return ROUTES.indexOf(name) >= 0 ? name : "home";
   }
 
-  function go(route) {
+  function go(route, arg) {
     if (ROUTES.indexOf(route) < 0) route = "home";
-    const next = "#/" + route;
+    state.routeArg = arg || "";
+    const next = "#/" + route + (state.routeArg ? "/" + state.routeArg : "");
     if (location.hash !== next) history.pushState({ route: route }, "", next);
     state.route = route;
     state.menu = null;
     render();
-    if (route === "home" || route === "more") loadDashboard();
+    loadRouteData();
+  }
+
+  function loadRouteData() {
+    if (!state.token && !state.authed) return;
+    if (state.route === "home" || state.route === "more") loadDashboard();
+    if (state.route === "tasks") loadTasks();
+    if (state.route === "briefings") { loadBriefings(); loadGainers(); }
+    if (state.route === "apps") loadIntegrations();
   }
 
   function uuid() {
@@ -122,7 +142,7 @@
   }
 
   async function loadDashboard() {
-    if (!state.token) return;
+    if (!state.token && !state.authed) return;
     state.dashState = state.offline ? "offline" : "loading";
     try {
       const response = await api("/api/v2/dashboard");
@@ -159,7 +179,12 @@
   }
 
   function shell(body) {
-    return '<div class="shell">' + body + "</div>" + nav() + sheet();
+    return '<div class="shell">' + body + "</div>" + snack() + nav() + sheet();
+  }
+
+  function snack() {
+    if (!state.undo) return "";
+    return '<div class="snack" role="status"><span>Task completed</span><button type="button" data-action="undo-task">Undo</button></div>';
   }
 
   function sheet() {
@@ -263,10 +288,20 @@
 
   function gainersPreview(block) {
     const asOf = block.retrieved_at ? "As of " + fmtTs(block.retrieved_at) : "No retrieval time";
-    let html = '<p class="meta">' + esc(block.source || "") + " · " + esc(asOf) + "</p>";
+    let html = '<p class="meta">' + esc(block.source || "combined") + " · " + esc(asOf) + "</p>";
+    const parts = block.parts || {};
+    ["moomoo", "webull"].forEach(function (name) {
+      if (!parts[name]) return;
+      html += '<p class="meta">' + esc(name) + ": " + esc(parts[name].state) + "</p>";
+    });
+    (block.rows || []).slice(0, 3).forEach(function (row) {
+      html += "<p><b>" + esc(row.ticker) + "</b> " + esc(row.change_pct) +
+        '% <span class="meta">' + esc(row.source) + "</span></p>";
+    });
     if (!block.rows || !block.rows.length) {
-      html += '<p class="empty">' + esc(block.empty || "No verified gainers.") + "</p>";
+      html += '<p class="empty">' + esc(block.detail || block.empty || "No verified gainers.") + "</p>";
     }
+    html += '<button class="list-btn" type="button" data-action="open-markets"><span>Open markets</span></button>';
     return html;
   }
 
@@ -423,19 +458,24 @@
   }
 
   function tasksScreen() {
-    const tasks = (state.dashboard && state.dashboard.tasks) || [];
     let html = screenHead("Tasks", "");
     html += '<div class="segments" role="tablist">' + TASK_VIEWS.map(function (view) {
       return '<button type="button" data-action="task-view" data-arg="' + view[0] + '" aria-pressed="' +
         (state.taskView === view[0] ? "true" : "false") + '">' + view[1] + "</button>";
     }).join("") + "</div>";
     html += '<section class="stack">';
-    if (state.dashState === "loading" && !state.dashboard) {
-      html += '<p class="banner">Loading the desk…</p>';
-    } else if (state.dashState === "error" && !state.dashboard) {
-      html += '<p class="banner bad">' + esc(state.dashError) + '</p><button class="retry" type="button" data-action="reload-home">Retry</button>';
-    } else if (!tasks.length) {
-      html += '<article class="card"><h2>Desk tasks</h2><p class="empty">No desk tasks yet. When you save one from chat it will show up here. No other account is connected.</p></article>';
+    if (state.taskError) {
+      html += '<p class="banner bad">Couldn\'t load tasks.</p><button class="retry" type="button" data-action="reload-tasks">Retry</button>';
+    } else if (!state.tasks.length) {
+      html += '<article class="card"><h2>Desk tasks</h2><p class="empty">No desk tasks in this view. Nothing is synced from another account.</p></article>';
+    } else {
+      state.tasks.forEach(function (task) {
+        const done = task.status === "completed";
+        html += '<button class="task-row' + (done ? " done" : "") + '" type="button" data-action="complete-task" data-arg="' +
+          esc(task.id) + '"><span class="check" aria-hidden="true">' + (done ? "✓" : "") + '</span><span><b class="title">' +
+          esc(task.title) + "</b><small>" + esc(task.owner) + " · " + esc(task.due_at || "No due time") +
+          "</small></span></button>";
+      });
     }
     html += "</section>";
     return html;
@@ -446,19 +486,116 @@
     html += '<div class="segments" role="tablist">' + BRIEF_TABS.map(function (tab) {
       return '<button type="button" data-action="brief-tab" data-arg="' + tab[0] + '" aria-pressed="' +
         (state.briefTab === tab[0] ? "true" : "false") + '">' + tab[1] + "</button>";
-    }).join("") + "</div>";
-    const item = state.dashboard && state.dashboard.briefing;
-    html += '<section class="stack">';
-    if (state.dashState === "error" && !state.dashboard) {
-      html += '<p class="banner bad">' + esc(state.dashError) + '</p><button class="retry" type="button" data-action="reload-home">Retry</button>';
-    } else if (!item) {
-      html += '<article class="card"><h2>Nothing filed</h2><p class="empty">No briefing yet. Market lines show up only from a verified feed, a saved desk brief, or a sourced provider response.</p></article>';
-    } else {
-      html += '<article class="card"><h2>' + esc(item.title) + '</h2><p class="meta">' +
-        esc(fmtTs(item.published_at || item.retrieved_at)) + "</p><p>" + esc(item.summary || "") + "</p></article>";
+    }).join("") + "</div><section class=\"stack\">";
+    if (state.briefTab === "markets") html += gainersModule();
+    const rows = state.briefings.filter(function (item) {
+      if (state.briefTab === "for_you") return true;
+      return item.category === state.briefTab;
+    });
+    if (!rows.length) {
+      html += '<article class="card"><h2>Nothing filed</h2><p class="empty">No briefing in this tab. Lines appear only from a verified feed, a saved desk brief, or a sourced provider response.</p></article>';
     }
+    rows.forEach(function (item) {
+      html += '<article class="card"><div class="subhead"><h2>' + esc(item.title) + "</h2>" +
+        (item.pinned ? '<span class="pill">Pinned</span>' : "") + "</div><p class=\"meta\">" +
+        esc(item.provenance === "desk_analysis" ? "Desk analysis" : "Source") + " · published " +
+        esc(fmtTs(item.published_at) || "unknown") + " · retrieved " + esc(fmtTs(item.retrieved_at)) +
+        "</p><p>" + esc(item.summary || "") + "</p>" +
+        '<button class="list-btn" type="button" data-action="ask-brief" data-arg="' + esc(item.title) +
+        '"><span>Ask the desk about this</span></button></article>';
+    });
     html += "</section>";
     return html;
+  }
+
+  function gainersModule() {
+    const block = state.gainers;
+    let html = '<article class="card"><div class="subhead"><h2>Top gainers</h2></div>';
+    html += '<div class="segments" style="padding:0 0 8px">';
+    ["combined", "moomoo", "webull"].forEach(function (source) {
+      const label = source === "webull" ? "Webull" : source === "moomoo" ? "moomoo" : "Combined";
+      html += '<button type="button" data-action="gainer-source" data-arg="' + source + '" aria-pressed="' +
+        (state.gainerSource === source ? "true" : "false") + '">' + label + "</button>";
+    });
+    html += "</div>";
+    if (!block) {
+      html += '<p class="empty">Loading source state…</p></article>';
+      return html;
+    }
+    html += '<p class="meta">' + esc(block.source) + " · " +
+      (block.retrieved_at ? "as of " + esc(fmtTs(block.retrieved_at)) : "no retrieval time") + "</p>";
+    const parts = block.parts || {};
+    Object.keys(parts).forEach(function (name) {
+      html += '<p class="meta">' + esc(name) + ": " + esc(parts[name].state) +
+        (parts[name].detail ? " — " + esc(parts[name].detail) : "") + "</p>";
+    });
+    if (!block.rows || !block.rows.length) {
+      html += '<p class="empty">No verified rows for this source.</p>';
+    }
+    (block.rows || []).forEach(function (row) {
+      html += '<button class="gainer-row" type="button" data-action="ask-ticker" data-arg="' + esc(row.ticker) +
+        '"><span><b>' + esc(row.rank) + " " + esc(row.ticker) + "</b><small>" + esc(row.last) + " · " +
+        esc(row.change_pct) + "% · " + esc(row.session || "session unknown") + " · " + esc(row.source) +
+        "</small></span></button>";
+    });
+    html += '<p class="meta">A ticker opens a question for the desk. It does not place an order.</p></article>';
+    return html;
+  }
+
+  function appsScreen() {
+    const focus = state.routeArg;
+    if (focus) return appDetail(focus);
+    const apps = (state.integrations && state.integrations.apps) || [];
+    let html = screenHead("Apps and Bluetooth", "");
+    html += '<section class="stack">';
+    if (!apps.length) html += '<p class="banner">Loading connection state…</p>';
+    apps.forEach(function (item) {
+      const installed = nativeInstall(item.id);
+      let label = item.account === "connected" ? "Connected" : "Not connected";
+      if (installed === false) label = "Unavailable";
+      else if (installed === true && item.account !== "connected") label = "Installed · not connected";
+      html += '<button class="app-row" type="button" data-action="open-app" data-arg="' + esc(item.id) +
+        '"><span><b>' + esc(item.name) + "</b><small>" + esc(label) + "</small></span></button>";
+    });
+    html += '<article class="card"><h2>Bluetooth</h2>' + bluetoothBlock() + "</article></section>";
+    return html;
+  }
+
+  function appDetail(id) {
+    const apps = (state.integrations && state.integrations.apps) || [];
+    const item = apps.filter(function (row) { return row.id === id; })[0] || { id: id, name: id, account: "not_connected", detail: "" };
+    const installed = nativeInstall(id);
+    let html = screenHead(item.name || id, "");
+    html += '<section class="stack"><article class="card"><p class="meta">' + esc(item.detail || "No account is connected.") + "</p>";
+    if (installed === false) html += '<p class="empty">The app is not installed on this device. You can still open the verified web destination.</p>';
+    if (item.account !== "connected") html += '<p class="empty">No feed is shown. Account content appears only after an authenticated capability check.</p>';
+    html += '<button class="list-btn" type="button" data-action="launch-app" data-arg="' + esc(id) + '"><span>Open ' + esc(item.name || id) + "</span></button>";
+    html += '<button class="list-btn" type="button" data-action="ask-app" data-arg="' + esc(item.name || id) + '"><span>Ask the desk</span></button>';
+    html += "</article></section>";
+    return html;
+  }
+
+  function nativeInstall(id) {
+    try {
+      if (window.DeskNative && DeskNative.appInstallState) {
+        const parsed = JSON.parse(DeskNative.appInstallState());
+        if (parsed && typeof parsed[id] === "boolean") return parsed[id];
+      }
+    } catch (e) {}
+    return null;
+  }
+
+  function bluetoothBlock() {
+    let info = null;
+    try {
+      if (window.DeskNative && DeskNative.bluetoothState) info = JSON.parse(DeskNative.bluetoothState());
+    } catch (e) {}
+    if (!info || !info.state) {
+      return '<p class="empty">Bluetooth follows the phone. Open Desk on Android to read the adapter. This page will not pretend a switch changed it.</p>';
+    }
+    const on = info.state === "on";
+    return '<button class="list-btn" type="button" data-action="bluetooth" aria-pressed="' + (on ? "true" : "false") +
+      '"><span><b>Bluetooth ' + (on ? "on" : "off") + "</b><small>Opens system Bluetooth settings. The label updates when you come back.</small></span></button>";
   }
 
   function moreScreen() {
@@ -473,6 +610,7 @@
     html += '<article class="card"><h2>Standing rules</h2><p>' + esc(goal.lock || "No lock on file.") +
       "</p><p class=\"meta\" style=\"margin-top:8px\">" + esc(goal.risk || "") + "</p></article>";
     html += '<article class="card"><h2>Provider health</h2>' + deskStatus(desk) + "</article>";
+    html += '<article class="card"><h2>Apps and Bluetooth</h2><button class="list-btn" type="button" data-action="go" data-route="apps"><span>YouTube, Facebook, Snapchat, Bluetooth</span></button></article>';
     html += '<article class="card"><h2>Voice</h2><button class="list-btn" type="button" data-action="speak-toggle"><span>' +
       (state.speakOn ? "Speaker on" : "Speaker off") + "<small>Reads new replies on this device.</small></span></button></article>";
     html += '<article class="card"><h2>Versions</h2><p class="meta" id="versions">' + esc(state.versionLabel || "Loading versions…") + "</p>" +
@@ -490,13 +628,13 @@
   }
 
   function render() {
-    if (state.signedOut || !state.token) {
+    if (state.signedOut || (!state.token && !state.authed)) {
       app.innerHTML = gate();
       return;
     }
     const focusId = document.activeElement && document.activeElement.id;
     const caret = focusId && document.activeElement.selectionStart;
-    const screens = { home: homeScreen, desk: deskScreen, tasks: tasksScreen, briefings: briefingsScreen, more: moreScreen };
+    const screens = { home: homeScreen, desk: deskScreen, tasks: tasksScreen, briefings: briefingsScreen, more: moreScreen, apps: appsScreen };
     app.innerHTML = shell((screens[state.route] || homeScreen)());
     if (focusId) {
       const field = document.getElementById(focusId);
@@ -615,10 +753,11 @@
   }
 
   function connect() {
-    if (!state.token) return;
+    if (!state.token && !state.authed) return;
     const gen = ++socketGen;
     const proto = location.protocol === "https:" ? "wss" : "ws";
-    ws = new WebSocket(proto + "://" + location.host + "/ws?token=" + encodeURIComponent(state.token));
+    const query = state.token ? ("?token=" + encodeURIComponent(state.token)) : "";
+    ws = new WebSocket(proto + "://" + location.host + "/ws" + query);
     ws.onopen = function () {
       if (gen !== socketGen) return;
       state.connected = true;
@@ -751,6 +890,7 @@
         ["reply-msg", "Reply", String(index)],
         ["pin-msg", "Pin", String(index)],
         ["retry-msg", "Retry", String(index)],
+        ["task-msg", "Turn into task", String(index)],
         ["close-menu", "Close"],
       ],
     };
@@ -826,8 +966,20 @@
       if (ws) try { ws.close(); } catch (e) {}
       history.replaceState({}, "", location.pathname);
       render();
-    } else if (action === "task-view") { state.taskView = arg; render(); }
-    else if (action === "brief-tab") { state.briefTab = arg; render(); }
+    }     else if (action === "task-view") { state.taskView = arg; loadTasks(); }
+    else if (action === "brief-tab") { state.briefTab = arg; if (arg === "markets") loadGainers(); render(); }
+    else if (action === "reload-tasks") loadTasks();
+    else if (action === "open-markets") { state.briefTab = "markets"; go("briefings"); }
+    else if (action === "gainer-source") { state.gainerSource = arg; loadGainers(); }
+    else if (action === "open-app") go("apps", arg);
+    else if (action === "launch-app") launchApp(arg);
+    else if (action === "ask-app") { state.draft = "Look at " + arg + " with me."; go("desk"); }
+    else if (action === "ask-brief") { state.draft = "About this briefing: " + arg; go("desk"); }
+    else if (action === "ask-ticker") { state.draft = "What should I know about " + arg + "? Read only — do not place an order."; go("desk"); }
+    else if (action === "complete-task") completeTask(arg);
+    else if (action === "undo-task") undoTask();
+    else if (action === "bluetooth") openBluetooth();
+    else if (action === "task-msg") turnIntoTask(Number(arg));
     else if (action === "copy-msg") copyMessage(Number(arg));
     else if (action === "share-msg") shareMessage(Number(arg));
     else if (action === "reply-msg") {
@@ -905,10 +1057,12 @@
   window.addEventListener("hashchange", function () {
     state.route = routeFromHash();
     render();
+    loadRouteData();
   });
   window.addEventListener("popstate", function () {
     state.route = routeFromHash();
     render();
+    loadRouteData();
   });
   window.addEventListener("offline", function () {
     state.offline = true;
@@ -931,6 +1085,115 @@
     viewport.addEventListener("scroll", apply);
     apply();
   }
+
+  async function loadTasks() {
+    try {
+      const response = await api("/api/v2/tasks?view=" + encodeURIComponent(state.taskView));
+      if (!response.ok) throw new Error("tasks");
+      state.tasks = (await response.json()).tasks || [];
+      state.taskError = false;
+    } catch (e) {
+      state.taskError = true;
+    }
+    if (state.route === "tasks") render();
+  }
+
+  async function loadBriefings() {
+    try {
+      const response = await api("/api/v2/briefings");
+      if (!response.ok) throw new Error("briefings");
+      state.briefings = (await response.json()).briefings || [];
+    } catch (e) {
+      state.briefings = [];
+    }
+    if (state.route === "briefings") render();
+  }
+
+  async function loadGainers() {
+    try {
+      const response = await api("/api/v2/market/top-gainers?source=" + encodeURIComponent(state.gainerSource));
+      if (!response.ok) throw new Error("gainers");
+      state.gainers = await response.json();
+    } catch (e) {
+      state.gainers = { source: state.gainerSource, state: "error", rows: [], detail: "Couldn't load gainers.", parts: {} };
+    }
+    if (state.route === "briefings" || state.route === "home") render();
+  }
+
+  async function loadIntegrations() {
+    try {
+      const response = await api("/api/v2/integrations");
+      if (!response.ok) throw new Error("integrations");
+      state.integrations = await response.json();
+    } catch (e) {
+      state.integrations = { apps: [] };
+    }
+    if (state.route === "apps") render();
+  }
+
+  async function completeTask(id) {
+    const task = state.tasks.filter(function (item) { return item.id === id; })[0];
+    if (!task || task.status === "completed") return;
+    const response = await api("/api/v2/tasks/" + encodeURIComponent(id) + "/complete", { method: "POST" });
+    if (!response.ok) return;
+    state.undo = task;
+    await loadTasks();
+    loadDashboard();
+  }
+
+  async function undoTask() {
+    const task = state.undo;
+    state.undo = null;
+    if (!task) { render(); return; }
+    await api("/api/v2/tasks/" + encodeURIComponent(task.id), {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status: "open" }),
+    });
+    await loadTasks();
+    loadDashboard();
+  }
+
+  async function turnIntoTask(index) {
+    const message = state.messages[index];
+    state.menu = null;
+    if (!message) { render(); return; }
+    const title = (message.text || "Desk task").slice(0, 140);
+    await api("/api/v2/tasks", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        title: title,
+        source_message_id: message.id || message.message_id || null,
+        thread_id: message.thread_id || "desk",
+      }),
+    });
+    go("tasks");
+  }
+
+  async function launchApp(id) {
+    try {
+      if (window.DeskNative && DeskNative.openConnectedApp) {
+        DeskNative.openConnectedApp(id);
+        return;
+      }
+    } catch (e) {}
+    const response = await api("/api/v2/integrations/" + encodeURIComponent(id) + "/launch", { method: "POST" });
+    if (!response.ok) return;
+    const target = await response.json();
+    if (target.web) window.open(target.web, "_blank", "noopener");
+  }
+
+  function openBluetooth() {
+    try {
+      if (window.DeskNative && DeskNative.openBluetoothSettings) DeskNative.openBluetoothSettings();
+    } catch (e) {}
+  }
+
+  window.deskBluetoothUpdated = function (raw) {
+    state.bluetooth = raw;
+    if (state.route === "apps") render();
+  };
 
   async function pinMessage(index) {
     const message = state.messages[index];
@@ -994,6 +1257,7 @@
     if (state.authed || state.token) {
       connect();
       loadDashboard();
+      loadRouteData();
     }
   });
 })();

@@ -94,6 +94,85 @@ CREATE INDEX IF NOT EXISTS idx_messages_for ON messages(for_message_id);
 """
 
 
+SCHEMA_PHASE_D = """
+CREATE TABLE IF NOT EXISTS tasks (
+  id TEXT PRIMARY KEY,
+  title TEXT NOT NULL,
+  notes TEXT NOT NULL DEFAULT '',
+  due_at TEXT,
+  owner TEXT NOT NULL,
+  status TEXT NOT NULL,
+  priority TEXT NOT NULL DEFAULT 'normal',
+  source_message_id TEXT,
+  thread_id TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  completed_at TEXT
+);
+CREATE TABLE IF NOT EXISTS briefings (
+  id TEXT PRIMARY KEY,
+  category TEXT NOT NULL,
+  title TEXT NOT NULL,
+  summary TEXT NOT NULL DEFAULT '',
+  body_markdown TEXT NOT NULL DEFAULT '',
+  published_at TEXT,
+  retrieved_at TEXT NOT NULL,
+  source_items_json TEXT NOT NULL DEFAULT '[]',
+  related_symbols_json TEXT NOT NULL DEFAULT '[]',
+  canonical_key TEXT NOT NULL,
+  read INTEGER NOT NULL DEFAULT 0,
+  pinned INTEGER NOT NULL DEFAULT 0,
+  provenance TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_briefing_key ON briefings(canonical_key);
+"""
+
+OWNERS = {"shavor", "ace", "rail", "anchor", "external"}
+TASK_STATUSES = {"open", "waiting", "completed"}
+
+
+def task_view(task, today):
+    if task.get("status") == "completed":
+        return "completed"
+    if task.get("status") == "waiting":
+        return "waiting"
+    due = task.get("due_at") or ""
+    if today and due and due[:10] > today:
+        return "upcoming"
+    return "today"
+
+
+def canonical_key(title, sources):
+    for item in sources or []:
+        if isinstance(item, dict) and item.get("url"):
+            return "url:" + str(item["url"]).strip().lower()
+    collapsed = " ".join((title or "").lower().split())
+    return "title:" + collapsed
+
+
+def infer_provenance(sources):
+    for item in sources or []:
+        if isinstance(item, dict) and (item.get("url") or item.get("name")):
+            return "news"
+    return "desk_analysis"
+
+
+def pin_title(title):
+    text = (title or "").lower()
+    return "pre-market" in text or "sunday scan" in text
+
+
+def briefing_row(row):
+    if row is None:
+        return None
+    item = dict(row)
+    item["source_items"] = json.loads(item.pop("source_items_json") or "[]")
+    item["related_symbols"] = json.loads(item.pop("related_symbols_json") or "[]")
+    item["read"] = bool(item["read"])
+    item["pinned"] = bool(item["pinned"])
+    return item
+
+
 class Store:
     def __init__(self, path):
         self.path = path
@@ -102,12 +181,13 @@ class Store:
         self.db.row_factory = sqlite3.Row
         self.db.execute("PRAGMA journal_mode=WAL")
         self.db.executescript(SCHEMA)
+        self.db.executescript(SCHEMA_PHASE_D)
         self.db.commit()
 
     def wipe(self):
         with self._lock:
             for table in ("messages", "requests", "ace_jobs", "sessions",
-                          "decisions", "threads", "context_packs"):
+                          "decisions", "threads", "context_packs", "tasks", "briefings"):
                 self.db.execute(f"DELETE FROM {table}")
             self.db.commit()
 
@@ -422,6 +502,146 @@ class Store:
         with self._lock:
             self.db.execute("DELETE FROM messages WHERE created_at < ?", (cutoff_iso,))
             self.db.commit()
+
+    def add_task(self, title, notes="", due_at=None, owner="shavor", status="open",
+                 priority="normal", source_message_id=None, thread_id=None):
+        owner = owner if owner in OWNERS else "shavor"
+        status = status if status in TASK_STATUSES else "open"
+        now = now_iso()
+        task_id = str(uuid.uuid4())
+        with self._lock:
+            self.db.execute(
+                """INSERT INTO tasks (
+                    id, title, notes, due_at, owner, status, priority, source_message_id,
+                    thread_id, created_at, updated_at, completed_at
+                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (task_id, title[:200], (notes or "")[:2000], due_at or None, owner, status,
+                 priority or "normal", source_message_id, thread_id, now, now,
+                 now if status == "completed" else None),
+            )
+            self.db.commit()
+        return self.get_task(task_id)
+
+    def get_task(self, task_id):
+        with self._lock:
+            row = self.db.execute("SELECT * FROM tasks WHERE id = ?", (task_id,)).fetchone()
+        return dict(row) if row else None
+
+    def list_tasks(self, view=None, today=None):
+        with self._lock:
+            rows = self.db.execute("SELECT * FROM tasks ORDER BY updated_at DESC").fetchall()
+        tasks = [dict(row) for row in rows]
+        if not view:
+            return tasks
+        return [task for task in tasks if task_view(task, today) == view]
+
+    def update_task(self, task_id, fields):
+        current = self.get_task(task_id)
+        if not current:
+            return None
+        allowed = ("title", "notes", "due_at", "owner", "status", "priority")
+        for key in allowed:
+            if key in fields and fields[key] is not None:
+                current[key] = fields[key]
+        if current["owner"] not in OWNERS:
+            current["owner"] = "shavor"
+        if current["status"] not in TASK_STATUSES:
+            current["status"] = "open"
+        completed_at = current.get("completed_at")
+        if current["status"] == "completed":
+            completed_at = completed_at or now_iso()
+        else:
+            completed_at = None
+        with self._lock:
+            self.db.execute(
+                """UPDATE tasks SET title=?, notes=?, due_at=?, owner=?, status=?, priority=?,
+                   updated_at=?, completed_at=? WHERE id=?""",
+                (current["title"], current["notes"], current["due_at"], current["owner"],
+                 current["status"], current["priority"], now_iso(), completed_at, task_id),
+            )
+            self.db.commit()
+        return self.get_task(task_id)
+
+    def complete_task(self, task_id):
+        return self.update_task(task_id, {"status": "completed"})
+
+    def upsert_briefing(self, record):
+        """Insert or collapse onto the existing canonical story."""
+        now = now_iso()
+        title = (record.get("title") or "").strip()[:200]
+        sources = record.get("source_items") or []
+        key = canonical_key(title, sources)
+        provenance = record.get("provenance") or infer_provenance(sources)
+        pinned = 1 if record.get("pinned") or pin_title(title) else 0
+        category = record.get("category") or "for_you"
+        with self._lock:
+            existing = self.db.execute(
+                "SELECT * FROM briefings WHERE canonical_key = ?", (key,)
+            ).fetchone()
+            if existing:
+                prior = json.loads(existing["source_items_json"] or "[]")
+                prior.append({
+                    "summary": record.get("summary") or "",
+                    "retrieved_at": now,
+                    "source_items": sources,
+                })
+                self.db.execute(
+                    """UPDATE briefings SET summary=?, body_markdown=?, retrieved_at=?,
+                       source_items_json=?, published_at=COALESCE(?, published_at),
+                       provenance=?, pinned=CASE pinned WHEN 1 THEN 1 ELSE ? END,
+                       category=? WHERE id=?""",
+                    (record.get("summary") or existing["summary"],
+                     record.get("body_markdown") or existing["body_markdown"],
+                     now, json.dumps(prior), record.get("published_at"), provenance,
+                     pinned, category, existing["id"]),
+                )
+                self.db.commit()
+                briefing_id = existing["id"]
+            else:
+                briefing_id = record.get("briefing_id") or str(uuid.uuid4())
+                self.db.execute(
+                    """INSERT INTO briefings (
+                        id, category, title, summary, body_markdown, published_at, retrieved_at,
+                        source_items_json, related_symbols_json, canonical_key, read, pinned, provenance
+                    ) VALUES (?,?,?,?,?,?,?,?,?,?,0,?,?)""",
+                    (briefing_id, category, title, record.get("summary") or "",
+                     record.get("body_markdown") or "", record.get("published_at"), now,
+                     json.dumps(sources), json.dumps(record.get("related_symbols") or []),
+                     key, pinned, provenance),
+                )
+                self.db.commit()
+        return self.get_briefing(briefing_id)
+
+    def get_briefing(self, briefing_id):
+        with self._lock:
+            row = self.db.execute("SELECT * FROM briefings WHERE id = ?", (briefing_id,)).fetchone()
+        return briefing_row(row) if row else None
+
+    def list_briefings(self, category=None):
+        with self._lock:
+            if category and category != "for_you":
+                rows = self.db.execute(
+                    "SELECT * FROM briefings WHERE category = ? ORDER BY pinned DESC, retrieved_at DESC",
+                    (category,),
+                ).fetchall()
+            else:
+                rows = self.db.execute(
+                    "SELECT * FROM briefings ORDER BY pinned DESC, retrieved_at DESC"
+                ).fetchall()
+        return [briefing_row(row) for row in rows]
+
+    def mark_briefing_read(self, briefing_id):
+        with self._lock:
+            self.db.execute("UPDATE briefings SET read = 1 WHERE id = ?", (briefing_id,))
+            self.db.commit()
+        return self.get_briefing(briefing_id)
+
+    def latest_briefing(self):
+        items = self.list_briefings()
+        if not items:
+            return None
+        pinned = [item for item in items if item.get("pinned")]
+        return pinned[0] if pinned else items[0]
 
     def backfill(self, entries):
         """Import legacy JSONL rows once. Returns how many new rows were stored."""
