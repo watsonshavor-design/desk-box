@@ -695,14 +695,14 @@
       function openApps(name){
         switchView('briefing'); selectBrief('apps');
         if(name){
-          document.getElementById('sourceSummary').innerHTML = '<strong>'+name+' selected.</strong> Account content is not connected in this static prototype; the native app will open this source in the unified feed after authorization.';
+          document.getElementById('sourceSummary').innerHTML = '<strong>'+name+' selected.</strong> Account content is not connected in this app; the native app will open this source in the unified feed after authorization.';
           showToast(name + ' feed selected');
         }
       }
       document.getElementById('manageAppsBtn').addEventListener('click', function(){ openApps(); });
       document.querySelectorAll('[data-app-shortcut]').forEach(function(btn){ btn.addEventListener('click', function(){ openApps(btn.dataset.appShortcut); }); });
       document.querySelectorAll('.app-preview').forEach(function(btn){ btn.addEventListener('click', function(){
-        document.getElementById('sourceSummary').innerHTML = '<strong>'+btn.dataset.app+' selected.</strong> Account content is not connected in this static prototype; the native app will open this source in the unified feed after authorization.';
+        document.getElementById('sourceSummary').innerHTML = '<strong>'+btn.dataset.app+' selected.</strong> Account content is not connected in this app; the native app will open this source in the unified feed after authorization.';
         showToast(btn.dataset.app + ' feed preview opened');
       }); });
       document.getElementById('bluetoothSwitch').addEventListener('click', function(){
