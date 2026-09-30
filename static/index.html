@@ -189,6 +189,7 @@
     .filter-chip { border:1px solid var(--line); background:transparent; color:var(--muted); padding:6px 9px; border-radius:20px; font-size:11px; font-weight:700; cursor:pointer; }
     .filter-chip.active { background:var(--surface-3); color:var(--ink); }
     .mode-inline { display:flex; align-items:center; gap:9px; font-size:11px; color:var(--muted); font-weight:600; }
+    .mode-inline-group { display:flex; align-items:center; gap:14px; flex-wrap:wrap; justify-content:flex-end; }
     .messages { padding:22px; display:grid; gap:18px; flex:1; align-content:start; }
     .message { display:grid; grid-template-columns:30px minmax(0,1fr); gap:10px; max-width:760px; }
     .message.me { margin-left:auto; grid-template-columns:minmax(0,1fr); max-width:75%; }
@@ -550,7 +551,10 @@
           <article class="card chat-panel">
             <div class="chat-toolbar">
               <div class="personas" aria-label="Message filters"><button class="filter-chip active" data-filter="all">All</button><button class="filter-chip" data-filter="ace">Ace</button><button class="filter-chip" data-filter="rail">Rail</button><button class="filter-chip" data-filter="anchor">Anchor</button></div>
-              <label class="mode-inline">One answer <button class="switch mode-switch" role="switch" aria-checked="true" aria-label="Toggle one-answer mode"></button></label>
+              <div class="mode-inline-group">
+                <label class="mode-inline">One answer <button class="switch mode-switch" role="switch" aria-checked="true" aria-label="Toggle one-answer mode"></button></label>
+                <label class="mode-inline">Conversational <button type="button" class="switch" id="conversationalSwitch" role="switch" aria-checked="false" aria-label="Toggle conversational mode"></button></label>
+              </div>
             </div>
             <div class="messages" id="log"></div>
             <div class="composer">
@@ -1015,9 +1019,107 @@ speakBtn.onclick = () => {
 // --- Voice: talk instead of type -------------------------------------------
 const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
 let rec = null, recOn = false;
-if (!SR) { micBtn.style.display = "none"; }
-else {
+let conversationalOn = false;
+let convRec = null;
+const WAKE_HEY = /^hey[,\s]+desk\b[,.:;\-\s]*/i;
+const WAKE_DESK = /^desk\b[,.:;\-\s]*/i;
+
+function stripWake(transcript){
+  const t = String(transcript || "").trim();
+  if (!t) return null;
+  let rest = null;
+  if (WAKE_HEY.test(t)) rest = t.replace(WAKE_HEY, "").trim();
+  else if (WAKE_DESK.test(t)) rest = t.replace(WAKE_DESK, "").trim();
+  else return null;
+  return rest || null;
+}
+
+function setSpeakEnabled(on){
+  speakOn = !!on;
+  speakBtn.textContent = speakOn ? "🔊" : "🔇";
+  speakBtn.classList.toggle("on", speakOn);
+  if (!speakOn && "speechSynthesis" in window) {
+    try { speechSynthesis.cancel(); } catch(e) {}
+  }
+}
+
+window.deskSetConversational = window.deskSetConversational || function(on){
+  conversationalOn = !!on;
+  const sw = document.getElementById("conversationalSwitch");
+  if (sw) sw.setAttribute("aria-checked", on ? "true" : "false");
+  if (on) setSpeakEnabled(true);
+};
+
+window.deskConversationalUtterance = window.deskConversationalUtterance || function(text){
+  const spoken = String(text || "").trim();
+  if (!spoken) return "empty";
+  input.value = spoken;
+  send();
+  return "sent";
+};
+
+function stopBrowserConversational(){
+  conversationalOn = false;
+  if (convRec) {
+    try { convRec.onend = convRec.onerror = convRec.onresult = null; convRec.stop(); } catch(e) {}
+    convRec = null;
+  }
+}
+
+function startBrowserConversational(){
+  if (!SR || (window.DeskNative && DeskNative.setConversationalMode)) return;
+  stopBrowserConversational();
+  conversationalOn = true;
+  setSpeakEnabled(true);
+  const loop = () => {
+    if (!conversationalOn || !SR) return;
+    try { if ("speechSynthesis" in window && speechSynthesis.speaking) {
+      setTimeout(loop, 400); return;
+    } } catch(e) {}
+    convRec = new SR();
+    convRec.lang = "en-US";
+    convRec.interimResults = false;
+    convRec.maxAlternatives = 1;
+    convRec.continuous = false;
+    convRec.onresult = (ev) => {
+      const t = (ev.results[0] && ev.results[0][0] && ev.results[0][0].transcript) || "";
+      const cmd = stripWake(t);
+      if (cmd) window.deskConversationalUtterance(cmd);
+    };
+    convRec.onend = () => { if (conversationalOn) setTimeout(loop, 280); };
+    convRec.onerror = () => { if (conversationalOn) setTimeout(loop, 800); };
+    try { convRec.start(); } catch(e) { if (conversationalOn) setTimeout(loop, 1200); }
+  };
+  loop();
+}
+
+(function wireConversationalSwitch(){
+  const sw = document.getElementById("conversationalSwitch");
+  if (!sw || sw.dataset.roomConv === "1") return;
+  sw.dataset.roomConv = "1";
+  sw.addEventListener("click", function(){
+    const on = sw.getAttribute("aria-checked") !== "true";
+    sw.setAttribute("aria-checked", on ? "true" : "false");
+    if (window.DeskNative && DeskNative.setConversationalMode) {
+      DeskNative.setConversationalMode(on);
+      window.deskSetConversational(on);
+      return;
+    }
+    if (on) startBrowserConversational();
+    else stopBrowserConversational();
+    window.deskSetConversational(on);
+    if (typeof showToast === "function") {
+      showToast(on ? 'Conversational on — say "Hey Desk …"' : "Conversational off");
+    }
+  });
+})();
+
+// Hide the web mic only when this browser has no SR and no native bridge.
+if (!SR && !(window.DeskNative && DeskNative.toggleMic)) {
+  micBtn.style.display = "none";
+} else if (SR && !(window.DeskNative && DeskNative.toggleMic)) {
   micBtn.onclick = () => {
+    if (conversationalOn) return;
     if (recOn) { try { rec.stop(); } catch(e) {} return; }
     try { if ("speechSynthesis" in window) speechSynthesis.cancel(); } catch(e) {}
     rec = new SR();
