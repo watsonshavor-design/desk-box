@@ -27,11 +27,12 @@ import uuid
 from datetime import datetime, timedelta, timezone
 
 from fastapi import FastAPI, File, Request, UploadFile, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from providers import PROVIDERS
 import providers as providers_mod
+import api_v2
 
 
 # Shared room memory, maintained by Ace and pushed from the main chat.
@@ -355,7 +356,13 @@ async def on_startup():
 async def index(token: str = ""):
     if token != DESK_TOKEN:
         return JSONResponse({"error": "bad token"}, status_code=403)
-    return FileResponse(os.path.join(BASE_DIR, "static", "index.html"))
+    path = os.path.join(BASE_DIR, "static", "index.html")
+    with open(path) as handle:
+        html = handle.read().replace("{{version}}", api_v2.read_version()["frontend"])
+    return HTMLResponse(html, headers={"Cache-Control": "no-store"})
+
+
+api_v2.register(app)
 
 
 @app.get("/api/desk")
