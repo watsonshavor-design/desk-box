@@ -41,7 +41,9 @@ question and a synthesis, and it is not unique or idempotent.
 
 ## What must not change until the job API lands
 
-Keep the `@ace` inbox filter so the current poller does not suddenly
-receive every line in the room. Do not treat `/api/recent` as a claim
-queue. One-answer completion stays a bridge post until Phase 2 (message
-reliability) adds leased jobs and exactly-once completion.
+The legacy inbox filter is unchanged, so the current poller does not
+suddenly receive every line. One-answer questions now also create a
+leased job. A bridge that wants every Shavor question should call
+`GET /api/ace/jobs/next` and finish it with
+`POST /api/ace/jobs/{id}/complete` exactly once. A second completion is
+rejected. `/api/ace-inbox` is still `@ace` only.
