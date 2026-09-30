@@ -448,7 +448,7 @@
       <header class="topbar">
         <div><p class="eyebrow" id="viewEyebrow">Tuesday evening · Sep 29</p><h1 id="viewTitle">Good evening, Shavor</h1></div>
         <div class="top-actions">
-          <span class="proto-badge"><span class="live-dot"></span>Interactive prototype</span>
+          <span class="proto-badge"><span class="live-dot"></span>Live room</span>
           <button class="icon-btn" id="infoBtn" aria-label="Open redesign notes"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7.5h.01"/></svg></button>
         </div>
       </header>
@@ -464,13 +464,13 @@
           </article>
           <div class="stack">
             <article class="card mini-card">
-              <div class="card-head"><h3>Build progress</h3><button class="text-btn" data-go="tasks">All tasks</button></div>
-              <div class="metric-row"><span>Android refresh</span><strong>1 of 3</strong></div>
-              <div class="progress" aria-label="One of three build tasks ready"><span style="width:33%"></span></div>
+              <div class="card-head"><h3>Desk</h3><button class="text-btn" data-go="chat">Open chat</button></div>
+              <div class="metric-row"><span>One answer</span><strong>On</strong></div>
+              <div class="progress" aria-label="The room is live"><span style="width:100%"></span></div>
               <div class="task-list">
-                <button class="task-row" data-task="media"><span class="task-marker green"></span><span class="task-copy"><strong>Photo + video code</strong><small>Merged on main</small></span><span class="task-arrow">›</span></button>
-                <button class="task-row" data-task="voice"><span class="task-marker"></span><span class="task-copy"><strong>Finish PR #2</strong><small>Voice + microphone</small></span><span class="task-arrow">›</span></button>
-                <button class="task-row" data-task="pipeline"><span class="task-marker"></span><span class="task-copy"><strong>Add APK workflow</strong><small>Build on every main push</small></span><span class="task-arrow">›</span></button>
+                <button class="task-row" data-go="chat"><span class="task-marker green"></span><span class="task-copy"><strong>Chat is the room</strong><small>Voice, photos, and one answer</small></span><span class="task-arrow">›</span></button>
+                <button class="task-row" data-go="market"><span class="task-marker"></span><span class="task-copy"><strong>Gainers feed</strong><small>Not connected yet</small></span><span class="task-arrow">›</span></button>
+                <button class="task-row" data-go="briefing"><span class="task-marker green"></span><span class="task-copy"><strong>Phone app</strong><small>Opens this page</small></span><span class="task-arrow">›</span></button>
               </div>
             </article>
             <article class="card app-card">
@@ -483,9 +483,9 @@
               <p class="app-card-foot">Choose which sources can appear in your unified feed.</p>
             </article>
             <article class="card mini-card system-card">
-              <div class="card-head"><h3>System snapshot</h3><span class="section-label" style="margin:0">SEP 29</span></div>
-              <div class="system-line"><span class="sys-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 17V7a3 3 0 0 1 3-3h10a3 3 0 0 1 3 3v10a3 3 0 0 1-3 3H7a3 3 0 0 1-3-3Z"/><path d="M8 8h8M8 12h5"/></svg></span><span>Railway backend</span><strong class="state">Healthy</strong></div>
-              <div class="system-line"><span class="sys-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 2h8a2 2 0 0 1 2 2v16a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2Z"/><path d="M10 18h4"/></svg></span><span>Fresh Android APK</span><strong class="state warn">Blocked</strong></div>
+              <div class="card-head"><h3>System snapshot</h3><span class="section-label" id="snapshotWhen" style="margin:0">NOW</span></div>
+              <div class="system-line"><span class="sys-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 17V7a3 3 0 0 1 3-3h10a3 3 0 0 1 3 3v10a3 3 0 0 1-3 3H7a3 3 0 0 1-3-3Z"/><path d="M8 8h8M8 12h5"/></svg></span><span>Room</span><strong class="state" id="roomState">Connecting</strong></div>
+              <div class="system-line"><span class="sys-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 2h8a2 2 0 0 1 2 2v16a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2Z"/><path d="M10 18h4"/></svg></span><span>Phone app</span><strong class="state">Opens this page</strong></div>
             </article>
           </div>
         </div>
@@ -558,16 +558,14 @@
       <section class="view" id="tasksView" aria-label="Tasks">
         <p class="page-intro">A lightweight task layer keeps builds, research, and decisions attached to the conversation that created them—without turning the room into a stream of status messages.</p>
         <div class="task-board">
-          <section class="task-column"><div class="column-head"><strong>Next</strong><span>2</span></div>
-            <button class="task-tile" data-task="voice"><span class="tag orange">ANDROID</span><h3>Finish and merge PR #2</h3><p>Review native speaker and mic behavior, run device checks, then squash merge.</p><footer><span>Build lane</span><span class="owners"><i class="owner">A</i></span></footer></button>
-            <button class="task-tile" data-task="handoff"><span class="tag">CURSOR HANDOFF</span><h3>Apply redesign to production app</h3><p>Translate this information architecture and component set into the Android shell and room UI.</p><footer><span>Design lane</span><span class="owners"><i class="owner">A</i><i class="owner rail">C</i></span></footer></button>
+          <section class="task-column"><div class="column-head"><strong>Next</strong><span>1</span></div>
+            <button class="task-tile" data-go="market"><span class="tag orange">MARKET</span><h3>Connect a gainers feed</h3><p>Moomoo and Webull rankings stay empty until a real feed is attached. This list will not invent prices.</p><footer><span>Not connected</span></footer></button>
           </section>
-          <section class="task-column"><div class="column-head"><strong>In progress</strong><span>1</span></div>
-            <button class="task-tile" data-task="pipeline"><span class="tag orange">BUILD</span><h3>Add APK delivery workflow</h3><p>Build on every push to main and upload the debug APK as a downloadable artifact.</p><footer><span>Release lane</span><span class="owners"><i class="owner rail">C</i></span></footer></button>
+          <section class="task-column"><div class="column-head"><strong>How the team works</strong><span>1</span></div>
+            <button class="task-tile" data-go="chat"><span class="tag">ROOM</span><h3>One answer in Chat</h3><p>Rail and Anchor brief Ace in private. Shavor gets one reply, with voice and photos on the same bar.</p><footer><span>Live</span></footer></button>
           </section>
-          <section class="task-column"><div class="column-head"><strong>Ready to verify</strong><span>2</span></div>
-            <button class="task-tile" data-task="media"><span class="tag">MERGED</span><h3>Photo and video support</h3><p>Code is on main; verify camera, gallery, and video after the fresh APK is installed.</p><footer><span>On-device test</span><span class="owners"><i class="owner">S</i></span></footer></button>
-            <button class="task-tile" data-task="funnel"><span class="tag">ROOM</span><h3>One-answer funnel</h3><p>Confirm the updated room loads, is on by default, and produces one synthesized reply.</p><footer><span>Room test</span><span class="owners"><i class="owner">S</i><i class="owner anchor">A</i></span></footer></button>
+          <section class="task-column"><div class="column-head"><strong>Already in the app</strong><span>1</span></div>
+            <button class="task-tile" data-go="chat"><span class="tag">PHONE</span><h3>Open Desk on the phone</h3><p>The installed app loads this page. A new install is not required for this layout.</p><footer><span>Live</span></footer></button>
           </section>
         </div>
       </section>
@@ -630,7 +628,7 @@
   <script>
     (function(){
       var titles = {
-        today: ["Tuesday evening · Sep 29", "Good evening, Shavor"],
+        today: ["Desk", "Good evening, Shavor"],
         market: ["Broker-ranked movers", "Market scan"],
         chat: ["One room · three perspectives", "Desk conversation"],
         tasks: ["Build, verify, hand off", "Tasks"],
@@ -912,8 +910,9 @@ function setThinking(provider, state){
 function connect(){
   const proto = location.protocol === "https:" ? "wss" : "ws";
   ws = new WebSocket(`${proto}://${location.host}/ws?token=${encodeURIComponent(token)}`);
-  ws.onopen = () => { statusEl.textContent = "live"; statusEl.classList.add("on"); sendBtn.disabled=false; };
-  ws.onclose = () => { statusEl.textContent = "reconnecting…"; statusEl.classList.remove("on");
+  ws.onopen = () => { statusEl.textContent = "live"; statusEl.classList.add("on"); sendBtn.disabled=false;
+    var room = document.getElementById("roomState"); if(room){ room.textContent = "Live"; room.classList.remove("warn"); } };
+  ws.onclose = () => { statusEl.textContent = "reconnecting…"; statusEl.classList.remove("on"); var room = document.getElementById("roomState"); if(room){ room.textContent = "Reconnecting"; room.classList.add("warn"); }
                        sendBtn.disabled=true; setTimeout(connect, 2500); };
   ws.onmessage = (ev) => {
     const m = JSON.parse(ev.data);
@@ -998,6 +997,8 @@ fetch("/api/desk?token="+encodeURIComponent(token)).then(r=>r.json()).then(d=>{
   if(note) note.textContent = "One answer is on";
   var title = document.getElementById("viewTitle");
   if(title) title.textContent = greeting() + ", Shavor";
+  var eye = document.getElementById("viewEyebrow");
+  if(eye) eye.textContent = new Date().toLocaleDateString(undefined, {weekday:"long", month:"short", day:"numeric"});
 }).catch(()=>{});
 
 sendBtn.disabled = true;
