@@ -32,6 +32,7 @@ from fastapi.staticfiles import StaticFiles
 
 from providers import PROVIDERS
 import providers as providers_mod
+import gainers as gainers_mod
 
 
 # Shared room memory, maintained by Ace and pushed from the main chat.
@@ -335,6 +336,7 @@ async def worker():
 @app.on_event("startup")
 async def on_startup():
     asyncio.create_task(worker())
+    asyncio.create_task(gainers_mod.background_loop())
     # Restore room history from disk — otherwise every redeploy wipes it.
     async with history_lock:
         history.extend(load_history())
@@ -370,28 +372,13 @@ async def desk(token: str = ""):
 
 @app.get("/api/gainers")
 async def gainers(token: str = "", source: str = "combined"):
-    """Honest movers endpoint. No broker feed is wired yet — returns an
-    empty list with a freshness timestamp so the UI can refresh for real
-    without inventing prices."""
+    """Live top-gainers. Webull via public ranking API; Moomoo via OpenD
+    when reachable. Cache ~2 minutes. Never invents prices — failures
+    return empty items with an honest status/message."""
     if token != DESK_TOKEN:
         return JSONResponse({"error": "bad token"}, status_code=403)
-    src = (source or "combined").strip().lower()
-    if src not in ("combined", "moomoo", "webull"):
-        src = "combined"
-    labels = {
-        "combined": "Combined broker ranking",
-        "moomoo": "Moomoo ranking",
-        "webull": "Webull ranking",
-    }
-    return JSONResponse({
-        "ok": True,
-        "source": src,
-        "label": labels[src],
-        "items": [],
-        "updated_at": now_iso(),
-        "status": "not_connected",
-        "message": f"{src[0].upper() + src[1:]} feed not connected",
-    })
+    payload = await gainers_mod.get_gainers(source)
+    return JSONResponse(payload)
 
 
 # --- Ace bridge -----------------------------------------------------------

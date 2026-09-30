@@ -689,6 +689,8 @@
         if (!items.length) {
           if (list) { list.innerHTML = ''; list.hidden = true; }
           if (empty) empty.hidden = false;
+          var emptyText = document.getElementById('feedEmptyText');
+          if (emptyText && data && data.message) emptyText.textContent = data.message;
           return;
         }
         if (empty) empty.hidden = true;
@@ -696,9 +698,11 @@
         list.hidden = false;
         list.innerHTML = items.map(function(row, i){
           var sym = String(row.symbol || row.ticker || '—');
+          var src = row.source || ((row.sources && row.sources.join(',')) || '');
+          var symLabel = src ? (sym + ' · ' + src) : sym;
           var last = row.last != null ? row.last : (row.price != null ? row.price : '—');
           var chg = row.change != null ? row.change : (row.change_pct != null ? row.change_pct + '%' : '—');
-          return '<div class="mover-row"><span>'+(i+1)+'</span><span>'+sym+'</span><span>'+last+'</span><span>'+chg+'</span></div>';
+          return '<div class="mover-row"><span>'+(i+1)+'</span><span>'+symLabel+'</span><span>'+last+'</span><span>'+chg+'</span></div>';
         }).join('');
       }
       function loadGainers(source, announce){
