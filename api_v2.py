@@ -92,11 +92,32 @@ def register(app: FastAPI):
                 "attachment_kind": (attachment or {}).get("kind"),
             })
         memory_at = desk.room_memory.get("updated_ts") or None
+        import market
+        from datetime import datetime, timezone
+        today = datetime.now(timezone.utc).date().isoformat()
+        task_rows = []
+        for task in desk.store.list_tasks("today", today)[:3]:
+            task_rows.append({
+                "id": task["id"],
+                "title": task["title"],
+                "owner": task["owner"],
+                "due_label": task.get("due_at") or "No due time",
+                "status": task["status"],
+            })
+        gainers = market.top_gainers("combined")
+        apps = []
+        for app_row in market.integrations()["apps"]:
+            apps.append({
+                "id": app_row["id"],
+                "name": app_row["name"],
+                "state": app_row["account"],
+                "state_label": "Connected" if app_row["account"] == "connected" else "Not connected",
+            })
         return {
             "connection": {"state": "ok"},
             "priority": None,
-            "tasks": [],
-            "briefing": None,
+            "tasks": task_rows,
+            "briefing": desk.store.latest_briefing(),
             "desk": {
                 "ace": {
                     "state": "bridge",
@@ -115,4 +136,14 @@ def register(app: FastAPI):
             },
             "recent": recent,
             "decisions": desk.store.list_decisions()[:5],
+            "connected_apps": {"items": apps},
+            "top_gainers": {
+                "source": gainers["source"],
+                "state": gainers["state"],
+                "retrieved_at": gainers.get("retrieved_at"),
+                "detail": gainers.get("detail") or "",
+                "rows": gainers.get("rows") or [],
+                "parts": gainers.get("parts") or {},
+                "empty": gainers.get("detail") or "No verified gainers.",
+            },
         }

@@ -189,7 +189,17 @@ button { cursor: pointer; }
   align-items: center;
 }
 .list-btn + .list-btn, .task-row + .task-row, .app-row + .app-row { margin-top: 8px; }
-.list-btn small, .task-row small { display: block; color: var(--text-muted); font-size: 0.875rem; }
+.app-row > span, .gainer-row > span, .list-btn > span, .task-row > span {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.list-btn small, .task-row small, .app-row small, .gainer-row small {
+  display: block;
+  color: var(--text-muted);
+  font-size: 0.875rem;
+}
 
 .segments {
   display: flex;
@@ -331,6 +341,23 @@ button { cursor: pointer; }
   font-weight: 650;
 }
 .tab[aria-current="page"] { color: var(--accent); }
+.snack {
+  position: fixed;
+  left: 16px;
+  right: 16px;
+  bottom: calc(var(--nav-h) + var(--kb) + 12px + env(safe-area-inset-bottom));
+  z-index: 35;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: var(--radius-control);
+  background: var(--surface-2);
+  box-shadow: var(--shadow);
+}
+.snack button { min-height: 40px; border: 0; background: transparent; color: var(--accent); font-weight: 750; }
+.gainer-row { margin-top: 8px; }
 
 .sheet-back {
   position: fixed;

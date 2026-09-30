@@ -33,6 +33,7 @@ from fastapi.staticfiles import StaticFiles
 from providers import PROVIDERS
 import providers as providers_mod
 import api_v2
+import desk_routes
 from store import Store
 
 
@@ -514,6 +515,7 @@ async def index(request: Request, token: str = ""):
 
 
 api_v2.register(app)
+desk_routes.register(app)
 
 
 @app.get("/api/desk")

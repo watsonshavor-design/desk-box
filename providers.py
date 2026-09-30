@@ -55,8 +55,10 @@ def _need_key(name):
 
 
 def _mock_reply(provider, prompt):
+    question = (prompt or "").strip().splitlines()
+    tail = question[-1].strip() if question else ""
     return (f"[mock {provider} reply — dev mode, no API call made] "
-            f"Got it: {prompt[:80]}...")
+            f"Got it: {tail[:160]}")
 
 
 def _extract_grok_text(result):

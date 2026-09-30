@@ -9,8 +9,8 @@ def test_version_health_and_dashboard_are_token_gated(client):
     version = client.get("/api/v2/version", params={"token": "test-token"})
     assert version.status_code == 200
     body = version.json()
-    assert body["frontend"] == "1.6.0"
-    assert body["backend"] == "1.6.0"
+    assert body["frontend"] == "1.7.0"
+    assert body["backend"] == "1.7.0"
     assert body["protocol"] == "2"
 
     health = client.get("/api/v2/health", params={"token": "test-token"}).json()
@@ -24,8 +24,10 @@ def test_version_health_and_dashboard_are_token_gated(client):
     assert dashboard["priority"] is None
     assert dashboard["goal"]["progress"] is None
     assert dashboard["decisions"] == []
-    assert "top_gainers" not in dashboard
-    assert "connected_apps" not in dashboard
+    assert dashboard["top_gainers"]["rows"] == []
+    assert dashboard["top_gainers"]["state"] == "disconnected"
+    assert [item["state"] for item in dashboard["connected_apps"]["items"]] == [
+        "not_connected", "not_connected", "not_connected"]
     assert dashboard["desk"]["anchor"]["state"] == "mock"
 
 
@@ -34,8 +36,8 @@ def test_shell_is_network_first_and_names_the_routes(client):
     assert page.status_code == 200
     assert page.headers["cache-control"] == "no-store"
     assert "Shavor's Desk" in page.text
-    assert "/static/app.js?v=1.6.0" in page.text
-    assert "/static/app.css?v=1.5.0" in page.text or "/static/app.css?v=1.6.0" in page.text
+    assert "/static/app.js?v=1.7.0" in page.text
+    assert "/static/app.css?v=1.7.0" in page.text
     assert "maximum-scale" not in page.text
 
     script = client.get("/static/app.js").text
