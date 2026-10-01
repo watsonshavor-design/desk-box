@@ -571,7 +571,7 @@
             </div>
             <div class="messages" id="log"></div>
             <div class="composer">
-              <div class="compose-box"><input id="input" aria-label="Message the desk" placeholder="What's on your mind, Shavor?…" autocomplete="off"/><div class="compose-tools"><div class="toolset"><label for="fileInput" id="attachBtn" class="mini-icon" aria-label="Attach a photo or video"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m21.4 11.6-8.9 8.9a6 6 0 0 1-8.5-8.5l9.2-9.2a4 4 0 0 1 5.7 5.7l-9.2 9.2a2 2 0 0 1-2.8-2.8l8.5-8.5"/></svg></label><input type="file" id="fileInput" accept="image/*,video/*" class="filehidden"><button type="button" id="micBtn" class="mini-icon" aria-label="Dictate">🎤</button><button type="button" id="speakBtn" class="mini-icon" aria-label="Read new messages aloud">🔇</button><input type="checkbox" id="funnel" checked class="filehidden"><input type="checkbox" id="xtalk" class="filehidden"><span class="draft-note" id="desk">One answer is on</span></div><button class="send-demo" id="send" type="button" aria-label="Send"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/></svg></button></div></div>
+              <div class="compose-box"><input id="input" aria-label="Message the desk" placeholder="What's on your mind, Shavor?…" autocomplete="off"/><div class="compose-tools"><div class="toolset"><label for="fileInput" id="attachBtn" class="mini-icon" aria-label="Attach a photo or video"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m21.4 11.6-8.9 8.9a6 6 0 0 1-8.5-8.5l9.2-9.2a4 4 0 0 1 5.7 5.7l-9.2 9.2a2 2 0 0 1-2.8-2.8l8.5-8.5"/></svg></label><input type="file" id="fileInput" accept="image/*,video/*" class="filehidden"><button type="button" id="micBtn" class="mini-icon" aria-label="Dictate">🎤</button><button type="button" id="speakBtn" class="filehidden" hidden aria-hidden="true" tabindex="-1" disabled aria-label="Speaker controlled by Conversational mode"></button><input type="checkbox" id="funnel" checked class="filehidden"><input type="checkbox" id="xtalk" class="filehidden"><span class="draft-note" id="desk">One answer is on</span></div><button class="send-demo" id="send" type="button" aria-label="Send"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/></svg></button></div></div>
             </div>
           </article>
           <aside class="card protocol-card">
@@ -1174,7 +1174,9 @@ if ("speechSynthesis" in window) {
   speechSynthesis.onvoiceschanged = initVoices;
 }
 function speak(who, text){
-  if (!speakOn || !("speechSynthesis" in window)) return;
+  // TTS only while Conversational is on (no separate speaker button).
+  const conv = !!conversationalOn || !!window.__deskConversational;
+  if (!conv || !speakOn || !("speechSynthesis" in window)) return;
   try {
     speechSynthesis.cancel(); // one voice at a time — newest message wins
     const u = new SpeechSynthesisUtterance(text);
@@ -1187,17 +1189,13 @@ function speak(who, text){
     speechSynthesis.speak(u);
   } catch(e) {}
 }
-speakBtn.onclick = () => {
-  speakOn = !speakOn;
-  speakBtn.textContent = speakOn ? "🔊" : "🔇";
-  speakBtn.classList.toggle("on", speakOn);
-  if (!speakOn && "speechSynthesis" in window) {
-    try { speechSynthesis.cancel(); } catch(e) {}
-  } else if (speakOn) {
-    initVoices();
-    speak("ace", "Speaker on. I'll read new messages out loud. Tap again to mute me.");
-  }
-};
+// speakBtn is hidden/disabled: TTS is owned by Conversational mode only
+// (wake + auto-speak Ace). Manual mute/unmute was removed so it cannot
+// hijack or fight Conversational on the phone.
+if (speakBtn) {
+  speakBtn.onclick = null;
+  speakBtn.disabled = true;
+}
 
 // --- Voice: talk instead of type -------------------------------------------
 const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -1219,8 +1217,10 @@ function stripWake(transcript){
 
 function setSpeakEnabled(on){
   speakOn = !!on;
-  speakBtn.textContent = speakOn ? "🔊" : "🔇";
-  speakBtn.classList.toggle("on", speakOn);
+  if (speakBtn) {
+    speakBtn.textContent = speakOn ? "🔊" : "🔇";
+    speakBtn.classList.toggle("on", speakOn);
+  }
   if (!speakOn && "speechSynthesis" in window) {
     try { speechSynthesis.cancel(); } catch(e) {}
   }
@@ -1230,7 +1230,8 @@ window.deskSetConversational = window.deskSetConversational || function(on){
   conversationalOn = !!on;
   const sw = document.getElementById("conversationalSwitch");
   if (sw) sw.setAttribute("aria-checked", on ? "true" : "false");
-  if (on) setSpeakEnabled(true);
+  // TTS follows Conversational only — no separate speaker toggle.
+  setSpeakEnabled(!!on);
 };
 
 window.deskConversationalUtterance = window.deskConversationalUtterance || function(text){
@@ -1243,6 +1244,7 @@ window.deskConversationalUtterance = window.deskConversationalUtterance || funct
 
 function stopBrowserConversational(){
   conversationalOn = false;
+  setSpeakEnabled(false);
   if (convRec) {
     try { convRec.onend = convRec.onerror = convRec.onresult = null; convRec.stop(); } catch(e) {}
     convRec = null;
@@ -1303,11 +1305,14 @@ function startBrowserConversational(){
     if (window.DeskNative && DeskNative.setConversationalMode) {
       DeskNative.setConversationalMode(on);
       window.deskSetConversational(on);
+      // Native bridge may not mute speakOn on OFF; keep TTS tied to the switch.
+      setSpeakEnabled(on);
       return;
     }
     if (on) startBrowserConversational();
     else stopBrowserConversational();
     window.deskSetConversational(on);
+    setSpeakEnabled(on);
     if (typeof showToast === "function") {
       showToast(on ? 'Conversational on — say "Hey Desk …"' : "Conversational off");
     }
