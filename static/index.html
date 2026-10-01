@@ -411,7 +411,17 @@
     .movers-list { display:grid; gap:0; }
     .mover-row { display:grid; grid-template-columns:48px minmax(0,1.2fr) minmax(0,.8fr) minmax(0,.8fr); gap:8px; padding:10px 4px; border-bottom:1px solid var(--line); font-size:13px; font-weight:600; }
     .mover-row span:first-child { color:var(--muted); font:500 12px "IBM Plex Mono", monospace; }
-    #refreshGainers { padding:7px 10px; font-size:11px; }
+    #refreshGainers { padding:7px 10px; font-size:11px; min-width:78px; }
+    #refreshGainers[aria-busy="true"] { opacity:.7; cursor:wait; }
+    .feed-meta { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:8px 14px; padding:10px 22px 12px; border-bottom:1px solid var(--line); color:var(--muted); font-size:11px; }
+    .feed-meta .feed-status { margin-top:0; }
+    .feed-meta .feed-status.ok i { background:#22a06b; }
+    .feed-meta .feed-status.empty i { background:var(--warm); }
+    .feed-meta .feed-status.error i, .feed-meta .feed-status.not_connected i { background:#c9372c; }
+    .feed-updated { margin:0; color:var(--muted); font-size:11px; font-family:"IBM Plex Mono",monospace; }
+    .answer-updated { margin:10px 0 0; color:var(--muted); font:500 11px "IBM Plex Mono",monospace; }
+    .task-marker.ok { background:#22a06b; }
+    .task-marker.warn { background:var(--warm); }
     #log .msg { max-width:92%; padding:10px 12px; border-radius:16px; line-height:1.45; font-size:14px; }
     #log .msg.me { margin-left:auto; background:var(--accent-soft); }
     #log .msg.grok, #log .msg.gemini, #log .msg.ace { background:var(--surface-2); border:1px solid var(--line); }
@@ -471,6 +481,7 @@
             <p class="section-label" id="answerLabel">DESK ANSWER · WAITING</p>
             <h2 id="answerTitle">Ask in Chat. You get one answer back.</h2>
             <p id="answerBody">Rail and Anchor brief Ace privately. The latest answer lands here and in the conversation.</p>
+            <p class="answer-updated" id="answerUpdated" hidden>Not updated yet</p>
             <div class="answer-meta"><span class="voice-pill warm"><i></i>Rail briefed</span><span class="voice-pill blue"><i></i>Anchor briefed</span><span class="voice-pill"><i></i>Ace synthesized</span></div>
             <div class="card-actions"><button class="primary-btn" data-go="chat">Open conversation</button><button class="ghost-btn" id="showSourcesToday">Show the private takes</button></div>
           </article>
@@ -481,7 +492,7 @@
               <div class="progress" aria-label="The room is live"><span style="width:100%"></span></div>
               <div class="task-list">
                 <button class="task-row" data-go="chat"><span class="task-marker green"></span><span class="task-copy"><strong>Chat is the room</strong><small>Voice, photos, and one answer</small></span><span class="task-arrow">›</span></button>
-                <button class="task-row" data-go="market"><span class="task-marker"></span><span class="task-copy"><strong>Gainers feed</strong><small>Not connected yet</small></span><span class="task-arrow">›</span></button>
+                <button class="task-row" data-go="market" id="todayGainersRow"><span class="task-marker" id="todayGainersMarker"></span><span class="task-copy"><strong>Gainers feed</strong><small id="todayGainersStatus">Checking…</small></span><span class="task-arrow">›</span></button>
                 <button class="task-row" data-go="briefing"><span class="task-marker green"></span><span class="task-copy"><strong>Phone app</strong><small>Opens this page</small></span><span class="task-arrow">›</span></button>
               </div>
             </article>
@@ -510,7 +521,7 @@
       </section>
 
       <section class="view" id="marketView" aria-label="Top gainers">
-        <p class="page-intro">Gainers stay out of Chat until you have a real feed. Nothing on this screen is a live price.</p>
+        <p class="page-intro" id="marketIntro">Broker rankings for desk scan — not an executable quote tape. Last-checked shows when each tab was refreshed.</p>
         <div class="market-grid">
           <article class="card movers-card">
             <div class="movers-head">
@@ -522,14 +533,16 @@
                 <button class="ghost-btn" id="refreshGainers" type="button" aria-label="Refresh gainers">Refresh</button>
               </div>
             </div>
+            <div class="feed-meta" id="feedMeta">
+              <span class="feed-status" id="feedStatusPill"><i></i><span id="feedStatusText">Checking feeds…</span></span>
+              <p class="feed-updated" id="feedUpdated">Not refreshed yet</p>
+            </div>
             <div class="movers-columns" aria-hidden="true"><span>RANK</span><span>SYMBOL</span><span>LAST</span><span>CHANGE</span></div>
             <div class="movers-list" id="moversList" hidden></div>
             <div class="feed-empty" id="feedEmpty">
               <div class="feed-empty-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 18 9 13l3 3 7-9"/><path d="M14 7h5v5"/></svg></div>
-              <h3 id="feedEmptyTitle">Connect a market-data feed</h3>
-              <p id="feedEmptyText">No feed is connected, so this list is empty on purpose.</p>
-              <span class="feed-status"><i></i><span id="feedStatusText">Combined feed not connected</span></span>
-              <p class="feed-updated" id="feedUpdated" style="margin:10px 0 0;color:var(--muted);font-size:11px">Not refreshed yet</p>
+              <h3 id="feedEmptyTitle">Checking feeds…</h3>
+              <p id="feedEmptyText">Waiting on Webull and Moomoo.</p>
             </div>
           </article>
           <aside class="card integration-card">
@@ -541,8 +554,8 @@
           </aside>
         </div>
         <article class="card watch-snapshot">
-          <div><small>WATCHLIST</small><strong>No live quote on this screen</strong></div>
-          <div class="watch-price"><b>Gainers stay empty until a feed is connected</b><span>Prices in Chat come from the room, not from this list.</span></div>
+          <div><small>WATCHLIST</small><strong id="watchTitle">Scan list — not a live quote tape</strong></div>
+          <div class="watch-price"><b id="watchStatus">Checking feeds…</b><span id="watchHint">Prices in Chat come from the room, not from this list.</span></div>
         </article>
       </section>
 
@@ -577,7 +590,7 @@
         <p class="page-intro">A lightweight task layer keeps builds, research, and decisions attached to the conversation that created them—without turning the room into a stream of status messages.</p>
         <div class="task-board">
           <section class="task-column"><div class="column-head"><strong>Next</strong><span>1</span></div>
-            <button class="task-tile" data-go="market"><span class="tag orange">MARKET</span><h3>Connect a gainers feed</h3><p>Moomoo and Webull rankings stay empty until a real feed is attached. This list will not invent prices.</p><footer><span>Not connected</span></footer></button>
+            <button class="task-tile" data-go="market" id="tasksGainersTile"><span class="tag orange">MARKET</span><h3 id="tasksGainersTitle">Scan top gainers</h3><p id="tasksGainersBody">Webull and Moomoo rankings for desk scan. Soft-empty after hours is OK — this list will not invent prices.</p><footer><span id="tasksGainersFooter">Checking…</span></footer></button>
           </section>
           <section class="task-column"><div class="column-head"><strong>How the team works</strong><span>1</span></div>
             <button class="task-tile" data-go="chat"><span class="tag">ROOM</span><h3>One answer in Chat</h3><p>Rail and Anchor brief Ace in private. Shavor gets one reply, with voice and photos on the same bar.</p><footer><span>Live</span></footer></button>
@@ -593,11 +606,11 @@
         <div class="brief-page active" id="marketBrief">
           <div class="brief-grid">
             <article class="card brief-hero"><span class="stamp">MARKET DESK</span><h2>The live answer is in Chat, not a saved snapshot.</h2><p>This lane is the layout for a briefing. It does not invent a book, a close, or an order.</p></article>
-            <div class="insight-list"><article class="card insight"><strong>One answer</strong><p>Rail and Anchor brief Ace privately. You get a single reply in Chat and on Today.</p></article><article class="card insight"><strong>No feed yet</strong><p>Gainers stay empty until a market-data connection is added. Nothing here is a quote.</p></article><article class="card insight"><strong>Orders</strong><p>This page does not place, change, or cancel a trade.</p></article></div>
+            <div class="insight-list"><article class="card insight"><strong>One answer</strong><p>Rail and Anchor brief Ace privately. You get a single reply in Chat and on Today.</p></article><article class="card insight" id="briefGainersInsight"><strong id="briefGainersInsightTitle">Gainers scan</strong><p id="briefGainersInsightBody">Broker rankings for desk scan. Soft-empty after hours is honest — nothing here is an executable quote.</p></article><article class="card insight"><strong>Orders</strong><p>This page does not place, change, or cancel a trade.</p></article></div>
           </div>
         </div>
         <div class="brief-page" id="systemBrief">
-          <div class="news-list"><article class="card news-item"><div><h3>The room is this page</h3><p>Chat, voice, and photos are live. One answer is on, so you get a single reply.</p></div></article><article class="card news-item"><div><h3>The phone app opens this page</h3><p>You do not need a new install to see this layout.</p></div></article><article class="card news-item"><div><h3>Gainers are not connected</h3><p>That list stays empty until a real market feed is attached.</p></div></article></div>
+          <div class="news-list"><article class="card news-item"><div><h3>The room is this page</h3><p>Chat, voice, and photos are live. One answer is on, so you get a single reply.</p></div></article><article class="card news-item"><div><h3>The phone app opens this page</h3><p>You do not need a new install to see this layout.</p></div></article><article class="card news-item" id="briefGainersNews"><div><h3 id="briefGainersTitle">Gainers feed status</h3><p id="briefGainersBody">Checking Webull and Moomoo…</p></div></article></div>
         </div>
         <div class="brief-page" id="learningBrief">
           <div class="brief-grid"><article class="card brief-hero"><span class="stamp">PLAYBOOK NOTE</span><h2>Separate research, debate, decision, and execution.</h2><p>Each phase should produce a distinct artifact: source takes, a synthesized answer, an explicit owner, and a verification result. This keeps the desk fast without losing disagreement or evidence.</p><div class="card-actions"><button class="primary-btn" id="openProtocolFromBrief">Open protocol details</button></div></article><div class="insight-list"><article class="card insight"><strong>Confidence labels</strong><p>Each private take should report confidence and identify the single fact most likely to change it.</p></article><article class="card insight"><strong>Context receipts</strong><p>Show which attachments, prices, rules, and recent decisions were included in the prompt.</p></article><article class="card insight"><strong>Decision memory</strong><p>Save final decisions separately from chat history so old conversation cannot silently override them.</p></article></div></div>
@@ -677,24 +690,157 @@
         webull: ['Webull ranking · regular and extended hours', 'Webull feed not connected', 'A production broker or market-data connection is required before Webull-ranked movers can appear here.']
       };
       var activeGainerSource = 'combined';
+      var lastGainersBySource = {};
+      var lastCheckedBySource = {};
       function fmtFeedTime(iso){
         try {
           var d = iso ? new Date(iso) : new Date();
           return d.toLocaleString(undefined, {month:'short', day:'numeric', hour:'numeric', minute:'2-digit'});
         } catch (e) { return 'just now'; }
       }
+      function sourceTag(row){
+        if (row && Array.isArray(row.sources) && row.sources.length) {
+          return row.sources.filter(Boolean).join('+');
+        }
+        return (row && row.source) ? String(row.source) : '';
+      }
+      function setRefreshBusy(busy){
+        var btn = document.getElementById('refreshGainers');
+        if (!btn) return;
+        btn.setAttribute('aria-busy', busy ? 'true' : 'false');
+        btn.disabled = !!busy;
+        btn.textContent = busy ? 'Refreshing…' : 'Refresh';
+      }
+      function emptyTitleFor(status, source){
+        var st = (status || '').toLowerCase();
+        if (st === 'empty') return 'No gainers right now';
+        if (st === 'partial') return 'Partial feed';
+        if (st === 'error') return 'Feed timed out or failed';
+        if (st === 'ok') return 'No rows in this ranking';
+        if (st === 'not_connected') return 'Connect a market-data feed';
+        return (source === 'moomoo') ? 'Moomoo ranking' : 'Connect a market-data feed';
+      }
+      function summarizeFeed(data){
+        var status = (data && data.status) || 'not_connected';
+        var items = (data && data.items) || [];
+        var label = (data && data.label) || '';
+        var message = (data && data.message) || '';
+        var sources = (data && data.sources) || null;
+        var parts = [];
+        if (sources) {
+          ['webull','moomoo'].forEach(function(k){
+            var s = sources[k] || {};
+            var st = (s.status || 'not_connected').toLowerCase();
+            var n = s.count != null ? s.count : 0;
+            if (st === 'ok' && n) parts.push(k + ' ' + n);
+            else if (st === 'empty') parts.push(k + ' empty');
+            else if (st === 'error') parts.push(k + ' error');
+            else parts.push(k + ' off');
+          });
+        } else if (data && data.source) {
+          parts.push(data.source + (items.length ? (' ' + items.length) : (' ' + status)));
+        }
+        return {
+          status: status,
+          count: items.length,
+          label: label,
+          message: message,
+          parts: parts,
+          connected: status === 'ok' || status === 'partial' || status === 'empty' || items.length > 0
+        };
+      }
+      function updateTodayGainersStatus(data){
+        var sum = summarizeFeed(data);
+        var small = document.getElementById('todayGainersStatus');
+        var marker = document.getElementById('todayGainersMarker');
+        var line;
+        if (sum.count > 0) {
+          line = (sum.label || 'Feed live') + ' · ' + sum.count + ' rows';
+          if (marker) { marker.classList.add('ok'); marker.classList.remove('warn'); }
+        } else if (sum.status === 'empty') {
+          line = sum.message || 'Connected — no gainers right now';
+          if (marker) { marker.classList.add('ok'); marker.classList.remove('warn'); }
+        } else if (sum.status === 'partial') {
+          line = sum.message || 'Partial feed';
+          if (marker) { marker.classList.add('warn'); marker.classList.remove('ok'); }
+        } else if (sum.status === 'error') {
+          line = sum.message || 'Feed error — try Refresh';
+          if (marker) { marker.classList.add('warn'); marker.classList.remove('ok'); }
+        } else {
+          line = 'Not connected yet';
+          if (marker) { marker.classList.remove('ok'); marker.classList.remove('warn'); }
+        }
+        if (small) small.textContent = line;
+        var tTitle = document.getElementById('tasksGainersTitle');
+        var tBody = document.getElementById('tasksGainersBody');
+        var tFoot = document.getElementById('tasksGainersFooter');
+        if (tTitle) tTitle.textContent = sum.count ? 'Scan top gainers' : (sum.status === 'empty' ? 'Gainers soft-empty' : (sum.connected ? 'Scan top gainers' : 'Connect a gainers feed'));
+        if (tBody) tBody.textContent = sum.message || (sum.count ? (sum.count + ' ranked names loaded for desk scan.') : 'Webull and Moomoo rankings for desk scan. Soft-empty after hours is OK — this list will not invent prices.');
+        if (tFoot) tFoot.textContent = sum.count ? (sum.count + ' rows') : (sum.status === 'empty' ? 'Empty · auth ok' : (sum.connected ? sum.status : 'Not connected'));
+        var bTitle = document.getElementById('briefGainersTitle');
+        var bBody = document.getElementById('briefGainersBody');
+        if (bTitle) bTitle.textContent = sum.count ? 'Gainers feed connected' : (sum.status === 'empty' ? 'Gainers connected · empty' : (sum.connected ? 'Gainers feed status' : 'Gainers not connected'));
+        if (bBody) bBody.textContent = sum.message || (sum.count ? ('Showing ' + sum.count + ' ranked names. Not an executable quote tape.') : 'Waiting on a broker ranking.');
+        var iTitle = document.getElementById('briefGainersInsightTitle');
+        var iBody = document.getElementById('briefGainersInsightBody');
+        if (iTitle) iTitle.textContent = sum.count || sum.status === 'empty' ? 'Gainers scan' : 'Gainers scan';
+        if (iBody) iBody.textContent = sum.message || 'Broker rankings for desk scan. Soft-empty after hours is honest — nothing here is an executable quote.';
+      }
+      function updateWatchSnapshot(data){
+        var sum = summarizeFeed(data);
+        var title = document.getElementById('watchTitle');
+        var status = document.getElementById('watchStatus');
+        var hint = document.getElementById('watchHint');
+        var when = lastCheckedBySource[activeGainerSource] || (data && data.updated_at);
+        if (title) title.textContent = 'Scan list — not a live quote tape';
+        if (status) {
+          if (sum.count > 0) status.textContent = (sum.label || activeGainerSource) + ' · ' + sum.count + ' rows';
+          else if (sum.status === 'empty') status.textContent = sum.message || 'Connected — no gainers right now';
+          else if (sum.status === 'error') status.textContent = sum.message || 'Feed error — try Refresh';
+          else if (sum.connected) status.textContent = sum.message || 'Feed connected';
+          else status.textContent = 'No feed connected for this tab';
+        }
+        if (hint) hint.textContent = 'Last checked ' + fmtFeedTime(when) + ' · prices in Chat come from the room';
+      }
+      function applyFeedSubtitle(data){
+        var el = document.getElementById('feedSubtitle');
+        if (!el) return;
+        var base = (feedCopy[activeGainerSource] || feedCopy.combined)[0];
+        if (activeGainerSource === 'combined' && data && data.label) {
+          el.textContent = data.label + ' · regular and extended hours';
+        } else if (data && data.message && (data.status === 'empty' || data.status === 'partial')) {
+          el.textContent = base.replace(' · regular and extended hours', '') + ' · ' + (data.status === 'empty' ? 'no gainers right now' : 'partial');
+        } else {
+          el.textContent = base;
+        }
+      }
       function renderGainers(data){
         var list = document.getElementById('moversList');
         var empty = document.getElementById('feedEmpty');
         var items = (data && data.items) || [];
+        var status = (data && data.status) || (items.length ? 'ok' : 'not_connected');
         var updated = document.getElementById('feedUpdated');
-        if (updated) updated.textContent = 'Last checked ' + fmtFeedTime(data && data.updated_at);
-        if (data && data.message) document.getElementById('feedStatusText').textContent = data.message;
+        var statusText = document.getElementById('feedStatusText');
+        var statusPill = document.getElementById('feedStatusPill');
+        var emptyTitle = document.getElementById('feedEmptyTitle');
+        var emptyText = document.getElementById('feedEmptyText');
+        var when = (data && data.updated_at) || new Date().toISOString();
+        lastCheckedBySource[activeGainerSource] = when;
+        lastGainersBySource[activeGainerSource] = data;
+        if (updated) updated.textContent = 'Last checked ' + fmtFeedTime(when);
+        if (statusText) statusText.textContent = (data && (data.message || data.label)) || status;
+        if (statusPill) {
+          statusPill.classList.remove('ok','empty','error','not_connected','partial');
+          statusPill.classList.add(status === 'ok' ? 'ok' : (status === 'partial' ? 'empty' : status));
+        }
+        applyFeedSubtitle(data);
+        updateTodayGainersStatus(activeGainerSource === 'combined' ? data : (lastGainersBySource.combined || data));
+        updateWatchSnapshot(data);
         if (!items.length) {
           if (list) { list.innerHTML = ''; list.hidden = true; }
           if (empty) empty.hidden = false;
-          var emptyText = document.getElementById('feedEmptyText');
-          if (emptyText && data && data.message) emptyText.textContent = data.message;
+          if (emptyTitle) emptyTitle.textContent = emptyTitleFor(status, activeGainerSource);
+          if (emptyText) emptyText.textContent = (data && data.message) || (feedCopy[activeGainerSource] || feedCopy.combined)[2];
           return;
         }
         if (empty) empty.hidden = true;
@@ -702,41 +848,78 @@
         list.hidden = false;
         list.innerHTML = items.map(function(row, i){
           var sym = String(row.symbol || row.ticker || '—');
-          var src = row.source || ((row.sources && row.sources.join(',')) || '');
+          var src = sourceTag(row);
           var symLabel = src ? (sym + ' · ' + src) : sym;
           var last = row.last != null ? row.last : (row.price != null ? row.price : '—');
           var chg = row.change != null ? row.change : (row.change_pct != null ? row.change_pct + '%' : '—');
           return '<div class="mover-row"><span>'+(i+1)+'</span><span>'+symLabel+'</span><span>'+last+'</span><span>'+chg+'</span></div>';
         }).join('');
       }
-      function loadGainers(source, announce){
+      function loadGainers(source, announce, force){
         activeGainerSource = source || activeGainerSource || 'combined';
         var copy = feedCopy[activeGainerSource] || feedCopy.combined;
         document.getElementById('feedSubtitle').textContent = copy[0];
-        document.getElementById('feedStatusText').textContent = 'Checking feed…';
-        document.getElementById('feedEmptyText').textContent = copy[2];
+        document.getElementById('feedStatusText').textContent = force ? 'Refreshing…' : 'Checking feed…';
+        if (force) setRefreshBusy(true);
+        var keep = lastGainersBySource[activeGainerSource];
         var tok = '';
         try { tok = new URLSearchParams(location.search).get('token') || localStorage.getItem('desk_token') || ''; } catch (e) {}
         var url = '/api/gainers?source=' + encodeURIComponent(activeGainerSource) + '&token=' + encodeURIComponent(tok);
-        return fetch(url).then(function(r){ return r.json(); }).then(function(data){
+        if (force) url += '&force=1';
+        return fetch(url).then(function(r){
+          if (!r.ok) {
+            var err = new Error('HTTP ' + r.status);
+            err.status = r.status;
+            throw err;
+          }
+          return r.json();
+        }).then(function(data){
           if (!data || data.error) throw new Error((data && data.error) || 'gainers failed');
           renderGainers(data);
-          if (announce) showToast((data.label || activeGainerSource) + ' checked');
+          if (announce) {
+            var n = (data.items || []).length;
+            var toast = (data.label || activeGainerSource);
+            if (data.status === 'empty') toast += ' · empty';
+            else if (n) toast += ' · ' + n + ' rows';
+            else if (data.status === 'error') toast += ' · error';
+            showToast(toast + ' · ' + fmtFeedTime(data.updated_at));
+          }
           return data;
         }).catch(function(err){
-          renderGainers({items:[], updated_at: new Date().toISOString(), message: copy[1]});
-          document.getElementById('feedEmptyText').textContent = 'Could not reach the gainers endpoint. Try Refresh again.';
-          if (announce) showToast('Gainers refresh failed');
-        });
+          var status = (err && err.status) || 0;
+          var msg = (status === 502 || status === 504 || status === 408)
+            ? 'Feed gateway timed out — try Refresh again. Showing last good rows if any.'
+            : 'Could not reach the gainers endpoint. Try Refresh again.';
+          if (keep && (keep.items || []).length) {
+            var soft = Object.assign({}, keep, {
+              message: msg,
+              status: keep.status === 'ok' ? 'partial' : (keep.status || 'error'),
+              updated_at: new Date().toISOString()
+            });
+            renderGainers(soft);
+          } else {
+            renderGainers({
+              items: [],
+              updated_at: new Date().toISOString(),
+              status: 'error',
+              message: msg,
+              label: copy[1]
+            });
+            var emptyTitle = document.getElementById('feedEmptyTitle');
+            if (emptyTitle) emptyTitle.textContent = 'Feed timed out or failed';
+            document.getElementById('feedEmptyText').textContent = msg;
+          }
+          if (announce) showToast(status === 502 || status === 504 ? 'Gainers timed out (502) — retry' : 'Gainers refresh failed');
+        }).finally(function(){ setRefreshBusy(false); });
       }
       document.querySelectorAll('.source-tab').forEach(function(tab){ tab.addEventListener('click', function(){
         document.querySelectorAll('.source-tab').forEach(function(t){ t.classList.remove('active'); });
         tab.classList.add('active');
-        loadGainers(tab.dataset.source, true);
+        loadGainers(tab.dataset.source, true, false);
       }); });
       var refreshGainers = document.getElementById('refreshGainers');
-      if (refreshGainers) refreshGainers.addEventListener('click', function(){ loadGainers(activeGainerSource, true); });
-      loadGainers('combined', false);
+      if (refreshGainers) refreshGainers.addEventListener('click', function(){ loadGainers(activeGainerSource, true, true); });
+      loadGainers('combined', false, false);
 
       document.querySelectorAll('.source-toggle').forEach(function(btn){ btn.addEventListener('click', function(){
         var box = btn.nextElementSibling; if(!box) return;
@@ -1232,20 +1415,45 @@ function greeting(){
   const hr = new Date().getHours();
   return hr < 12 ? "Good morning" : hr < 17 ? "Good afternoon" : "Good evening";
 }
-function showAnswer(title, body){
+var _answerUpdatedAt = null;
+function fmtAnswerTime(iso){
+  try {
+    var d = iso ? new Date(iso) : new Date();
+    return d.toLocaleString(undefined, {month:'short', day:'numeric', hour:'numeric', minute:'2-digit'});
+  } catch (e) { return 'earlier'; }
+}
+function toneAnswerLabel(iso){
+  var label = document.getElementById("answerLabel");
+  var updated = document.getElementById("answerUpdated");
+  if (!iso) {
+    if (label) label.textContent = "DESK ANSWER · WAITING";
+    if (updated) { updated.hidden = true; }
+    return;
+  }
+  _answerUpdatedAt = iso;
+  var ageMs = Date.now() - new Date(iso).getTime();
+  var fresh = isFinite(ageMs) && ageMs >= 0 && ageMs < 30 * 60 * 1000;
+  if (label) label.textContent = fresh ? "DESK ANSWER · LIVE" : "DESK ANSWER · EARLIER";
+  if (updated) {
+    updated.hidden = false;
+    updated.textContent = (fresh ? "Updated " : "Last updated ") + fmtAnswerTime(iso);
+  }
+}
+function showAnswer(title, body, ts){
   var h = document.getElementById("answerTitle");
   var p = document.getElementById("answerBody");
   if(h && title) h.textContent = title;
   if(p && body) p.textContent = body;
+  if (ts) toneAnswerLabel(ts);
 }
+setInterval(function(){ if (_answerUpdatedAt) toneAnswerLabel(_answerUpdatedAt); }, 60000);
 var _addMsg = addMsg;
 addMsg = function(who, text, round, ts, att){
   var div = _addMsg(who, text, round, ts, att);
   if(who==="ace" && text){
     var line = text.split("\n")[0];
-    showAnswer(line.slice(0, 140), text);
-    var label = document.getElementById("answerLabel");
-    if(label) label.textContent = "DESK ANSWER · LIVE";
+    var when = ts || new Date().toISOString();
+    showAnswer(line.slice(0, 140), text, when);
   }
   var active = document.querySelector('.filter-chip.active');
   var filter = (active && active.dataset.filter) || window.__deskMsgFilter || 'all';

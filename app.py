@@ -371,14 +371,33 @@ async def desk(token: str = ""):
 
 
 @app.get("/api/gainers")
-async def gainers(token: str = "", source: str = "combined"):
+async def gainers(token: str = "", source: str = "combined", force: str = ""):
     """Live top-gainers. Webull via public ranking API; Moomoo via OpenAPI
     (MOOMOO_APP_KEY + MOOMOO_RSA_PRIVATE_KEY) or OpenD fallback. Cache ~2
-    minutes. Never invents prices — failures return empty items with an
-    honest status/message."""
+    minutes. force=1 bypasses cache (Refresh). Hard deadline so the
+    browser never sits on a proxy 502. Never invents prices — failures
+    return empty/partial items with an honest status/message."""
     if token != DESK_TOKEN:
         return JSONResponse({"error": "bad token"}, status_code=403)
-    payload = await gainers_mod.get_gainers(source)
+    do_force = str(force).strip().lower() in ("1", "true", "yes", "refresh")
+    try:
+        payload = await asyncio.wait_for(
+            gainers_mod.get_gainers(source, force=do_force),
+            timeout=16.0,
+        )
+    except asyncio.TimeoutError:
+        payload = {
+            "ok": False,
+            "source": (source or "combined").strip().lower() or "combined",
+            "label": "Feed timed out",
+            "items": [],
+            "updated_at": now_iso(),
+            "status": "error",
+            "message": (
+                "Gainers request timed out — try Refresh again. "
+                "Showing no invented prices."
+            ),
+        }
     return JSONResponse(payload)
 
 

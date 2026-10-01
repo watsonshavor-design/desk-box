@@ -141,7 +141,7 @@ def _row(
 async def fetch_webull() -> dict[str, Any]:
     """Fetch US top gainers from Webull public ranking API."""
     try:
-        async with httpx.AsyncClient(timeout=20.0) as client:
+        async with httpx.AsyncClient(timeout=10.0) as client:
             r = await client.get(
                 WEBULL_URL,
                 params=WEBULL_PARAMS,
@@ -461,7 +461,7 @@ def _fetch_moomoo_openapi() -> dict[str, Any] | None:
     }
 
     try:
-        with httpx.Client(timeout=25.0) as client:
+        with httpx.Client(timeout=8.0) as client:
             r = client.post(
                 f"{MOOMOO_WEBAPI}{path}",
                 content=body,
@@ -757,14 +757,19 @@ async def background_loop() -> None:
         await asyncio.sleep(CACHE_TTL_SEC)
 
 
-async def _get_cached(source: str) -> dict[str, Any]:
-    async with _lock:
-        entry = dict(_cache.get(source) or {})
-    if _stale(entry):
-        entry = await _refresh_one(source)
-    # Strip internal fields for callers.
-    out = {k: v for k, v in entry.items() if k != "fetched_mono"}
-    return out
+def _source_phrase(name: str, payload: dict[str, Any]) -> str:
+    """Short honest fragment for Combined labels (Webull; Moomoo empty)."""
+    status = (payload.get("status") or "not_connected").lower()
+    count = len(payload.get("items") or [])
+    if status == "ok" and count:
+        return f"{name}"
+    if status == "empty":
+        return f"{name} empty"
+    if status == "error":
+        return f"{name} error"
+    if status == "partial":
+        return f"{name} partial"
+    return f"{name} not connected"
 
 
 def _merge(webull: dict[str, Any], moomoo: dict[str, Any]) -> dict[str, Any]:
@@ -779,6 +784,8 @@ def _merge(webull: dict[str, Any], moomoo: dict[str, Any]) -> dict[str, Any]:
             if existing is None:
                 row = dict(item)
                 row["sources"] = list(item.get("sources") or [item.get("source")])
+                # Single-source rows keep a plain source label.
+                row["source"] = row["sources"][0] if len(row["sources"]) == 1 else ",".join(row["sources"])
                 by_sym[sym] = row
                 continue
             srcs = list(existing.get("sources") or [])
@@ -786,7 +793,7 @@ def _merge(webull: dict[str, Any], moomoo: dict[str, Any]) -> dict[str, Any]:
                 if s and s not in srcs:
                     srcs.append(s)
             existing["sources"] = srcs
-            existing["source"] = ",".join(srcs)
+            existing["source"] = ",".join(srcs) if len(srcs) > 1 else (srcs[0] if srcs else existing.get("source"))
             # Keep the quote with the larger absolute move as display price.
             old_pct = _num(existing.get("change_pct")) or 0.0
             new_pct = _num(item.get("change_pct")) or 0.0
@@ -802,25 +809,41 @@ def _merge(webull: dict[str, Any], moomoo: dict[str, Any]) -> dict[str, Any]:
         reverse=True,
     )
 
-    w_ok = webull.get("status") == "ok"
-    m_ok = moomoo.get("status") == "ok"
+    w_status = (webull.get("status") or "not_connected").lower()
+    m_status = (moomoo.get("status") or "not_connected").lower()
+    # empty = auth/query ok, soft no-rows (e.g. after hours) — not a disconnect.
+    w_live = w_status in ("ok", "empty")
+    m_live = m_status in ("ok", "empty")
+    w_ok = w_status == "ok" and bool(webull.get("items"))
+    m_ok = m_status == "ok" and bool(moomoo.get("items"))
+
+    w_phrase = _source_phrase("Webull", webull)
+    m_phrase = _source_phrase("Moomoo", moomoo)
+    honest_label = f"Combined ({w_phrase}; {m_phrase})"
+
     if w_ok and m_ok:
         status, message = "ok", (
-            f"Combined Webull + Moomoo ({len(items)} names, deduped)"
+            f"{honest_label} · {len(items)} names, deduped"
         )
-    elif w_ok:
+    elif w_ok or m_ok:
         status, message = "partial", (
-            f"Combined: Webull ok, Moomoo {moomoo.get('status')} — "
-            f"{moomoo.get('message') or moomoo.get('reason') or 'unavailable'}"
+            f"{honest_label} · showing "
+            f"{'Webull' if w_ok else 'Moomoo'} rows only"
+            + (
+                f" — {moomoo.get('message')}" if w_ok and not m_ok else ""
+            )
+            + (
+                f" — {webull.get('message')}" if m_ok and not w_ok else ""
+            )
         )
-    elif m_ok:
-        status, message = "partial", (
-            f"Combined: Moomoo ok, Webull {webull.get('status')} — "
-            f"{webull.get('message') or 'unavailable'}"
+    elif w_live or m_live:
+        # Both connected but empty (or one empty + other disconnected with no rows)
+        status, message = "empty", (
+            f"{honest_label} · no gainers right now"
         )
     else:
         status, message = "not_connected", (
-            "Neither broker feed returned movers. "
+            f"{honest_label}. "
             f"Webull: {webull.get('message')}; Moomoo: {moomoo.get('message')}"
         )
 
@@ -828,12 +851,14 @@ def _merge(webull: dict[str, Any], moomoo: dict[str, Any]) -> dict[str, Any]:
         "items": items,
         "status": status,
         "message": message,
+        "label": honest_label,
         "updated_at": _now_iso(),
         "sources": {
             "webull": {
                 "status": webull.get("status"),
                 "message": webull.get("message"),
                 "count": len(webull.get("items") or []),
+                "updated_at": webull.get("updated_at"),
                 "endpoint": webull.get("endpoint"),
             },
             "moomoo": {
@@ -841,6 +866,7 @@ def _merge(webull: dict[str, Any], moomoo: dict[str, Any]) -> dict[str, Any]:
                 "message": moomoo.get("message"),
                 "reason": moomoo.get("reason"),
                 "count": len(moomoo.get("items") or []),
+                "updated_at": moomoo.get("updated_at"),
                 "opend": moomoo.get("opend"),
                 "endpoint": moomoo.get("endpoint"),
                 "auth": moomoo.get("auth"),
@@ -849,29 +875,98 @@ def _merge(webull: dict[str, Any], moomoo: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-async def get_gainers(source: str = "combined") -> dict[str, Any]:
+async def _get_cached(source: str, *, force: bool = False) -> dict[str, Any]:
+    async with _lock:
+        entry = dict(_cache.get(source) or {})
+    if force or _stale(entry):
+        try:
+            entry = await asyncio.wait_for(_refresh_one(source), timeout=12.0)
+        except asyncio.TimeoutError:
+            log.warning("%s gainers refresh timed out", source)
+            # Soft-fail: keep last cache if any, else honest timeout payload.
+            if entry.get("items") is not None and entry.get("status"):
+                entry = dict(entry)
+                entry["message"] = (
+                    f"{entry.get('message') or source} (refresh timed out — showing last check)"
+                )
+            else:
+                entry = {
+                    "items": [],
+                    "status": "error",
+                    "message": f"{source} feed timed out",
+                    "reason": "upstream refresh exceeded 12s budget",
+                    "updated_at": _now_iso(),
+                    "fetched_mono": time.monotonic(),
+                }
+                async with _lock:
+                    # Do not clobber a warmer concurrent write.
+                    if not _cache.get(source):
+                        _cache[source] = entry
+    out = {k: v for k, v in entry.items() if k != "fetched_mono"}
+    return out
+
+
+async def get_gainers(source: str = "combined", force: bool = False) -> dict[str, Any]:
+    """Return gainers for one tab. force=True bypasses cache (Refresh button).
+
+    Caps total wait so Railway/proxy does not 502 the browser. On timeout,
+    returns last-known rows when available with an honest message — never
+    invents prices.
+    """
     src = (source or "combined").strip().lower()
     if src not in ("combined", "moomoo", "webull"):
         src = "combined"
 
-    if src == "webull":
-        data = await _get_cached("webull")
-    elif src == "moomoo":
-        data = await _get_cached("moomoo")
-    else:
+    async def _load() -> dict[str, Any]:
+        if src == "webull":
+            return await _get_cached("webull", force=force)
+        if src == "moomoo":
+            return await _get_cached("moomoo", force=force)
         webull, moomoo = await asyncio.gather(
-            _get_cached("webull"), _get_cached("moomoo")
+            _get_cached("webull", force=force),
+            _get_cached("moomoo", force=force),
         )
-        data = _merge(webull, moomoo)
+        return _merge(webull, moomoo)
 
+    try:
+        data = await asyncio.wait_for(_load(), timeout=14.0)
+    except asyncio.TimeoutError:
+        log.warning("get_gainers(%s) overall timeout", src)
+        # Best-effort snapshot from cache without blocking.
+        async with _lock:
+            w = {k: v for k, v in (_cache.get("webull") or {}).items() if k != "fetched_mono"}
+            m = {k: v for k, v in (_cache.get("moomoo") or {}).items() if k != "fetched_mono"}
+        if src == "webull":
+            data = w or {
+                "items": [], "status": "error",
+                "message": "Webull feed timed out — try Refresh again",
+                "updated_at": _now_iso(),
+            }
+        elif src == "moomoo":
+            data = m or {
+                "items": [], "status": "error",
+                "message": "Moomoo feed timed out — try Refresh again",
+                "updated_at": _now_iso(),
+            }
+        else:
+            data = _merge(
+                w or {"items": [], "status": "error", "message": "Webull timed out"},
+                m or {"items": [], "status": "error", "message": "Moomoo timed out"},
+            )
+            data["message"] = (
+                (data.get("message") or "Combined feed timed out")
+                + " — try Refresh again"
+            )
+
+    label = data.get("label") or LABELS[src]
     return {
         "ok": True,
         "source": src,
-        "label": LABELS[src],
+        "label": label,
         "items": data.get("items") or [],
         "updated_at": data.get("updated_at") or _now_iso(),
         "status": data.get("status") or "not_connected",
         "message": data.get("message") or f"{src} feed not connected",
-        **{k: data[k] for k in ("reason", "endpoint", "opend", "auth", "sources")
-           if k in data},
+        **{k: data[k] for k in ("reason", "endpoint", "opend", "auth", "sources", "label")
+           if k in data and k != "label"},
     }
