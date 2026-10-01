@@ -27,3 +27,20 @@ In Railway Variables for the desk-box service also set:
   (use `\n` for newlines in the Railway UI). AppKey alone is not enough —
   Traditional API Key auth signs every request with the private key.
 Webull gainers keep working without these. Combined merges both when Moomoo is ok.
+
+## Optional: local Ollama LLM (fallback)
+When a cloud provider (Grok/Gemini) fails, the desk can retry against a
+local OpenAI-compatible endpoint (Ollama). Set in Variables / `.env`:
+- `LOCAL_LLM_ENABLED` = `1` to register the local provider and enable fallback
+  (default `0` — cloud-only, unchanged behavior)
+- `LOCAL_LLM_URL` = OpenAI-compatible base URL
+  (default `http://localhost:11434/v1`)
+- `LOCAL_LLM_MODEL` = model name (default `llama3.1:8b`)
+Auth uses a fixed `Authorization: Bearer ollama` header (no real API key).
+Images are ignored for local calls (text-only). Successful fallbacks are
+prefixed with `[local fallback] ` in the stored/broadcast reply.
+
+**Railway note:** the default URL points at localhost on the *desk-box*
+container. Railway cannot reach an Ollama process on your laptop. For
+hosted fallback, point `LOCAL_LLM_URL` at a reachable Ollama/OpenAI-compatible
+host (private network, tunnel, or sidecar), or keep `LOCAL_LLM_ENABLED=0`.

@@ -10,9 +10,12 @@ Environment:
     GEMINI_API_KEY    Google AI Studio API key (Gemini)
     GROK_MODEL        override, default grok-4.5
     GEMINI_MODEL      override, default gemini-3.8-flash
+    LOCAL_LLM_URL     OpenAI-compatible base (default http://localhost:11434/v1)
+    LOCAL_LLM_MODEL   model name (default llama3.1:8b)
+    LOCAL_LLM_ENABLED set to "1" to register the local provider + fallback
 
 Set MOCK_PROVIDERS=1 to return canned replies instead of calling the
-APIs (local dev/test only — never in production).
+APIs (local, Grok, Gemini — local dev/test only — never in production).
 """
 import os
 
@@ -23,6 +26,9 @@ GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta"
 
 GROK_MODEL = os.environ.get("GROK_MODEL", "grok-4.5")
 GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-3.8-flash")
+LOCAL_LLM_URL = os.environ.get("LOCAL_LLM_URL", "http://localhost:11434/v1")
+LOCAL_LLM_MODEL = os.environ.get("LOCAL_LLM_MODEL", "llama3.1:8b")
+LOCAL_LLM_ENABLED = os.environ.get("LOCAL_LLM_ENABLED", "0")
 MOCK = os.environ.get("MOCK_PROVIDERS") == "1"
 
 DESK_HEADER = """You are one of Shavor's AI partners in his private room, alongside Ace (Muse) and \
@@ -177,7 +183,46 @@ async def ask_gemini(prompt, max_tokens=4000, crosstalk=False, other_take="",
     return out
 
 
+
+async def ask_local(prompt, max_tokens=1500, crosstalk=False, other_take="",
+                    image=None):
+    """Ask a local OpenAI-compatible LLM (Ollama). Images are ignored."""
+    if MOCK:
+        return _mock_reply("local", other_take or prompt)
+    if crosstalk:
+        text = (CROSSTALK_HEADER + "Shavor's message:\n" + prompt
+                + "\n\nOther partner's take:\n" + other_take)
+    else:
+        # Text-only: ignore any attached image.
+        text = _with_memory(DESK_HEADER) + prompt
+    payload = {
+        "model": LOCAL_LLM_MODEL,
+        "messages": [{"role": "user", "content": text}],
+    }
+    url = LOCAL_LLM_URL.rstrip("/") + "/chat/completions"
+    try:
+        async with httpx.AsyncClient(timeout=120) as client:
+            r = await client.post(
+                url, json=payload,
+                headers={"Authorization": "Bearer ollama",
+                         "Content-Type": "application/json"})
+            r.raise_for_status()
+            result = r.json()
+    except httpx.HTTPError as e:
+        raise RuntimeError(f"Local LLM API error: {e}") from e
+    choices = result.get("choices") or []
+    out = ""
+    if choices:
+        msg = (choices[0].get("message") or {})
+        out = (msg.get("content") or "").strip()
+    if not out:
+        raise RuntimeError("Local LLM returned no message text.")
+    return out
+
+
 PROVIDERS = {
     "grok": ask_grok,
     "gemini": ask_gemini,
 }
+if LOCAL_LLM_ENABLED == "1":
+    PROVIDERS["local"] = ask_local

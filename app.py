@@ -534,62 +534,92 @@ async def fan_out(job):
     takes = {}
 
     async def one(name):
+        await room.broadcast({"type": "status", "provider": name,
+                              "state": "thinking"})
+        prompt = (FUNNEL_HEADER + text) if funnel else text
+        reply = None
         try:
-            await room.broadcast({"type": "status", "provider": name,
-                                  "state": "thinking"})
-            prompt = (FUNNEL_HEADER + text) if funnel else text
             reply = await PROVIDERS[name](prompt, image=image)
-            first[name] = reply
-            takes[name] = {"text": reply, "error": False}
-            entry = {"from": name, "round": 1, "text": reply,
-                     "ts": now_iso()}
-            if funnel:
-                entry["hidden"] = True
-                entry["funnel"] = True
-                entry["for_ts"] = for_ts
-                await remember(entry)
-                await room.broadcast({"type": "status", "provider": name,
-                                      "state": "done"})
-            else:
-                await room.broadcast({"type": "reply", "provider": name,
-                                      "round": 1, "text": reply,
-                                      "ts": entry["ts"]})
-                await remember(entry)
         except Exception as e:  # one provider failing never blocks the other
-            err = f"{name} failed: {e}"
-            log.warning(err)
-            err_text = f"[{name} couldn't be reached — no take.]"
-            takes[name] = {"text": err_text, "error": True}
-            if funnel:
-                entry = {"from": name, "round": 1, "text": err_text,
-                         "ts": now_iso(), "hidden": True, "funnel": True,
-                         "for_ts": for_ts, "error": True}
-                await remember(entry)
-                await room.broadcast({"type": "status", "provider": name,
-                                      "state": "done"})
-            else:
-                await room.broadcast({"type": "status", "provider": name,
-                                      "state": "error", "detail": str(e)})
+            # Cloud failure → optional local Ollama fallback before placeholder.
+            if name != "local" and "local" in PROVIDERS:
+                try:
+                    log.warning("%s failed (%s); retrying with local LLM",
+                                name, e)
+                    reply = await PROVIDERS["local"](prompt, image=image)
+                    reply = "[local fallback] " + reply
+                except Exception as local_e:
+                    log.warning("%s local fallback failed: %s", name, local_e)
+                    e = local_e
+            if reply is None:
+                err = f"{name} failed: {e}"
+                log.warning(err)
+                err_text = f"[{name} couldn't be reached — no take.]"
+                takes[name] = {"text": err_text, "error": True}
+                if funnel:
+                    entry = {"from": name, "round": 1, "text": err_text,
+                             "ts": now_iso(), "hidden": True, "funnel": True,
+                             "for_ts": for_ts, "error": True}
+                    await remember(entry)
+                    await room.broadcast({"type": "status", "provider": name,
+                                          "state": "done"})
+                else:
+                    await room.broadcast({"type": "status", "provider": name,
+                                          "state": "error", "detail": str(e)})
+                return
+        first[name] = reply
+        takes[name] = {"text": reply, "error": False}
+        entry = {"from": name, "round": 1, "text": reply,
+                 "ts": now_iso()}
+        if funnel:
+            entry["hidden"] = True
+            entry["funnel"] = True
+            entry["for_ts"] = for_ts
+            await remember(entry)
+            await room.broadcast({"type": "status", "provider": name,
+                                  "state": "done"})
+        else:
+            await room.broadcast({"type": "reply", "provider": name,
+                                  "round": 1, "text": reply,
+                                  "ts": entry["ts"]})
+            await remember(entry)
 
-    await asyncio.gather(*(one(n) for n in PROVIDERS))
+    # Primary fan-out is cloud only; "local" is fallback, not a third seat.
+    cloud = [n for n in PROVIDERS if n != "local"]
+    await asyncio.gather(*(one(n) for n in cloud))
 
     if crosstalk and not funnel and "grok" in first and "gemini" in first:
         async def react(name, other):
+            await room.broadcast({"type": "status", "provider": name,
+                                  "state": "reacting"})
+            reply = None
             try:
-                await room.broadcast({"type": "status", "provider": name,
-                                      "state": "reacting"})
                 reply = await PROVIDERS[name](
                     text, crosstalk=True, other_take=first[other], image=image)
-                entry = {"from": name, "round": 2, "text": reply,
-                         "ts": now_iso()}
-                await room.broadcast({"type": "reply", "provider": name,
-                                      "round": 2, "text": reply,
-                                      "ts": entry["ts"]})
-                await remember(entry)
             except Exception as e:
-                log.warning("%s cross-talk failed: %s", name, e)
-                await room.broadcast({"type": "status", "provider": name,
-                                      "state": "error", "detail": str(e)})
+                if "local" in PROVIDERS:
+                    try:
+                        log.warning("%s cross-talk failed (%s); "
+                                    "retrying with local LLM", name, e)
+                        reply = await PROVIDERS["local"](
+                            text, crosstalk=True, other_take=first[other],
+                            image=image)
+                        reply = "[local fallback] " + reply
+                    except Exception as local_e:
+                        log.warning("%s cross-talk local fallback failed: %s",
+                                    name, local_e)
+                        e = local_e
+                if reply is None:
+                    log.warning("%s cross-talk failed: %s", name, e)
+                    await room.broadcast({"type": "status", "provider": name,
+                                          "state": "error", "detail": str(e)})
+                    return
+            entry = {"from": name, "round": 2, "text": reply,
+                     "ts": now_iso()}
+            await room.broadcast({"type": "reply", "provider": name,
+                                  "round": 2, "text": reply,
+                                  "ts": entry["ts"]})
+            await remember(entry)
 
         await asyncio.gather(react("grok", "gemini"), react("gemini", "grok"))
 
