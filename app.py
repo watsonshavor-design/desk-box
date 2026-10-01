@@ -129,9 +129,9 @@ DESK_TOKEN = os.environ.get("DESK_TOKEN") or secrets.token_urlsafe(24)
 # Static desk context shown in the room's side panel (update as the desk evolves).
 DESK_CONTEXT = {
     "goal": "$1M trading profit by Sep 2027 — working pace 8-10%/week",
-    "glnd_lock": ("Sell GLND at $7.00 — waiting Sell 2300 @ $7 ETH stays on the book. "
-                  "Rails: soft $7.15 / stall ~$6.90 / proceeds floor >= $15k. "
-                  "Cost yardstick ~$5.199. Never suggest canceling/resizing the $7 sell."),
+    "glnd_lock": ("GLND stock sold — qty 0. The old waiting-sell / $7 lock is retired. "
+                  "Do not brief 'Sell GLND at $7' or treat GLND stock as an open position. "
+                  "Confirm live book before mentioning any GLND residue (options/calls)."),
     "risk": ("Max 3 names, max $1,500/name, risk <=0.5%/trade (~$77). "
              "Kill switches: -$150/day, -$450/week, -$900/month."),
     "notes": ("General-purpose room: trading, research, learning, daily life, "
@@ -247,6 +247,178 @@ FUNNEL_HEADER = (
     "structured, and complete: lead with your conclusion, then your reasons. "
     "He reads Ace's synthesis, never this text, so make it count.]\n\n")
 
+# One-answer (funnel) completion tracking. Rail/Anchor takes are hidden;
+# Ace (Muse bridge) must POST /api/ace-reply with funnel_answer=true.
+# If Ace never posts, a watchdog posts an honest timeout Ace bubble so the
+# room never silently drops after "Rail+Anchor briefed."
+ACE_FUNNEL_TIMEOUT_SEC = float(os.environ.get("ACE_FUNNEL_TIMEOUT_SEC", "90"))
+_pending_funnels = {}  # for_ts -> dict
+_pending_funnels_lock = asyncio.Lock()
+
+
+def _funnel_answered(for_ts):
+    """True if Ace already posted a funnel_answer for this question ts."""
+    if not for_ts:
+        return False
+    for m in history:
+        if (m.get("from") == "ace"
+                and m.get("funnel_answer") is True
+                and str(m.get("for_ts") or "") == str(for_ts)):
+            return True
+    return False
+
+
+def _format_timeout_ace(question, takes, waited):
+    """Honest Ace bubble — no invented market numbers; disclose what we had."""
+    names = {"grok": "Rail", "gemini": "Anchor"}
+    lines = [
+        f"Ace synthesis timed out after {int(waited)}s — no silent drop.",
+        "Rail and Anchor briefed backstage, but the Ace bridge did not post "
+        "a one-answer synthesis in time. Retest, or ask again.",
+    ]
+    q = (question or "").strip()
+    if q:
+        lines.append(f"Question: {q[:240]}")
+    for key in ("grok", "gemini"):
+        take = (takes or {}).get(key) or {}
+        label = names[key]
+        body = (take.get("text") or "").strip()
+        if take.get("error") or not body:
+            lines.append(f"{label}: no usable take.")
+        else:
+            # Relay partner text only — do not invent prices/facts.
+            snippet = body.replace("\n", " ").strip()
+            if len(snippet) > 280:
+                snippet = snippet[:277] + "…"
+            lines.append(f"{label} (brief, not a fresh quote): {snippet}")
+    return "\n".join(lines)
+
+
+async def _post_ace_funnel(for_ts, text, *, timed_out=False):
+    """Inject one Ace funnel_answer into the room (idempotent on for_ts)."""
+    text = (text or "").strip()[:4000]
+    if not text or not for_ts:
+        return False
+    cancel_task = None
+    async with _pending_funnels_lock:
+        if _funnel_answered(for_ts):
+            pend = _pending_funnels.pop(for_ts, None)
+            if pend and pend.get("task"):
+                cancel_task = pend["task"]
+            posted = False
+        else:
+            # Claim the slot before releasing the lock so a twin watchdog
+            # cannot also post.
+            pend = _pending_funnels.pop(for_ts, None)
+            if pend and pend.get("task") and pend["task"] is not asyncio.current_task():
+                cancel_task = pend["task"]
+            posted = True
+            entry = {
+                "from": "ace",
+                "text": text,
+                "ts": now_iso(),
+                "funnel_answer": True,
+                "for_ts": str(for_ts),
+            }
+            if timed_out:
+                entry["timeout"] = True
+    if cancel_task is not None:
+        cancel_task.cancel()
+    if not posted:
+        return False
+    await remember(entry)
+    await room.broadcast({
+        "type": "reply",
+        "provider": "ace",
+        "round": 1,
+        "text": text,
+        "ts": entry["ts"],
+        "funnel_answer": True,
+        "for_ts": str(for_ts),
+        "timeout": bool(timed_out),
+    })
+    await room.broadcast({"type": "status", "provider": "ace", "state": "done"})
+    return True
+
+
+async def _funnel_watchdog(for_ts, timeout_sec):
+    try:
+        await asyncio.sleep(timeout_sec)
+    except asyncio.CancelledError:
+        return
+    async with _pending_funnels_lock:
+        pend = _pending_funnels.get(for_ts)
+        if not pend or pend.get("done"):
+            return
+        if _funnel_answered(for_ts):
+            _pending_funnels.pop(for_ts, None)
+            return
+        question = pend.get("question") or ""
+        takes = pend.get("takes") or {}
+        waited = pend.get("timeout_sec") or timeout_sec
+        pend["done"] = True
+    msg = _format_timeout_ace(question, takes, waited)
+    log.warning("funnel timeout for_ts=%s after %ss — posting Ace timeout bubble",
+                for_ts, int(waited))
+    await _post_ace_funnel(for_ts, msg, timed_out=True)
+
+
+async def register_funnel_pending(for_ts, question, takes):
+    """Arm Ace synthesis wait + watchdog. Always ends in Ace bubble or timeout."""
+    if not for_ts:
+        return
+    timeout_sec = max(1.0, float(ACE_FUNNEL_TIMEOUT_SEC))
+    async with _pending_funnels_lock:
+        if _funnel_answered(for_ts):
+            return
+        old = _pending_funnels.get(for_ts)
+        if old and old.get("task"):
+            old["task"].cancel()
+        task = asyncio.create_task(_funnel_watchdog(for_ts, timeout_sec))
+        _pending_funnels[for_ts] = {
+            "question": question or "",
+            "takes": takes or {},
+            "opened_ts": now_iso(),
+            "timeout_sec": timeout_sec,
+            "task": task,
+            "done": False,
+        }
+    await room.broadcast({
+        "type": "status",
+        "provider": "ace",
+        "state": "thinking",
+        "for_ts": for_ts,
+        "detail": "synthesizing",
+    })
+
+
+async def complete_funnel_pending(for_ts):
+    """Cancel watchdog once Ace posts a real funnel_answer."""
+    if not for_ts:
+        return
+    async with _pending_funnels_lock:
+        pend = _pending_funnels.pop(str(for_ts), None) or _pending_funnels.pop(for_ts, None)
+        if pend and pend.get("task"):
+            pend["task"].cancel()
+
+
+def list_open_funnels():
+    """Snapshot of pending one-answer jobs for the Ace bridge."""
+    out = []
+    for for_ts, pend in list(_pending_funnels.items()):
+        if pend.get("done") or _funnel_answered(for_ts):
+            continue
+        out.append({
+            "for_ts": for_ts,
+            "question": pend.get("question") or "",
+            "takes": pend.get("takes") or {},
+            "opened_ts": pend.get("opened_ts") or "",
+            "timeout_sec": pend.get("timeout_sec"),
+            "needs_synthesis": True,
+            "funnel": True,
+        })
+    return out
+
 
 async def fan_out(job):
     """Ask Grok and Gemini in parallel; optionally run one cross-talk round.
@@ -256,12 +428,15 @@ async def fan_out(job):
     photos, so a chart screenshot gets two expert reads, not just pixels.
     In funnel mode the takes are saved hidden (never broadcast) for Ace to
     synthesize into one answer; a failing provider leaves a hidden
-    error placeholder so the synthesis never waits forever."""
+    error placeholder so the synthesis never waits forever. After both
+    takes land, the server arms a pending funnel + watchdog so Ace always
+    posts a reply or an honest timeout bubble — never a silent drop."""
     text, crosstalk = job["text"], job["crosstalk"]
     image = job.get("image")
     funnel = job.get("funnel", False)
     for_ts = job.get("for_ts")
     first = {}
+    takes = {}
 
     async def one(name):
         try:
@@ -270,6 +445,7 @@ async def fan_out(job):
             prompt = (FUNNEL_HEADER + text) if funnel else text
             reply = await PROVIDERS[name](prompt, image=image)
             first[name] = reply
+            takes[name] = {"text": reply, "error": False}
             entry = {"from": name, "round": 1, "text": reply,
                      "ts": now_iso()}
             if funnel:
@@ -287,9 +463,10 @@ async def fan_out(job):
         except Exception as e:  # one provider failing never blocks the other
             err = f"{name} failed: {e}"
             log.warning(err)
+            err_text = f"[{name} couldn't be reached — no take.]"
+            takes[name] = {"text": err_text, "error": True}
             if funnel:
-                entry = {"from": name, "round": 1, "text":
-                         f"[{name} couldn't be reached — no take.]",
+                entry = {"from": name, "round": 1, "text": err_text,
                          "ts": now_iso(), "hidden": True, "funnel": True,
                          "for_ts": for_ts, "error": True}
                 await remember(entry)
@@ -320,6 +497,10 @@ async def fan_out(job):
                                       "state": "error", "detail": str(e)})
 
         await asyncio.gather(react("grok", "gemini"), react("gemini", "grok"))
+
+    if funnel and for_ts:
+        # Rail+Anchor done (or errored). Wake Ace path + guarantee a bubble.
+        await register_funnel_pending(for_ts, text, takes)
 
     await room.broadcast({"type": "done"})
 
@@ -402,19 +583,23 @@ async def gainers(token: str = "", source: str = "combined", force: str = ""):
 
 
 # --- Ace bridge -----------------------------------------------------------
-# There is no API for Muse, so Ace joins the room through these two
-# endpoints instead:
+# There is no API for Muse, so Ace joins the room through these endpoints:
 #   GET  /api/ace-inbox?token=...&since=<iso-ts> -> {"messages": [...]}
-#       Returns Shavor's messages mentioning @ace newer than `since`.
-#   POST /api/ace-reply  {"token": ..., "text": ..., "discuss"?: bool}
-#       -> {"ok": true}
+#       Returns Shavor's @ace mentions newer than `since`, PLUS open
+#       one-answer (funnel) questions that still need Ace synthesis
+#       (marked needs_synthesis / funnel, with partner takes attached).
+#   GET  /api/ace-funnel?token=... -> {"pending": [...]}
+#       Open funnel jobs only (question + takes + for_ts).
+#   POST /api/ace-reply  {"token": ..., "text": ..., "discuss"?: bool,
+#                         "funnel_answer"?: bool, "for_ts"?: ...}
 #       Injects Ace's reply into the room (broadcast + session log).
-#       When discuss=true, Ace's post is ALSO queued for the Grok/Gemini
-#       fan-out (framed as Ace speaking, single round) so Rail and Anchor
-#       can respond to it. Bot replies never re-enter the queue, so a
-#       discuss post yields at most one bot round and can never loop.
-# A scheduled check on Ace's side polls the inbox every couple of minutes
-# and posts replies. Any app implementing these two endpoints gets Ace.
+#       funnel_answer+for_ts completes the pending one-answer job and
+#       cancels the watchdog. Duplicate funnel_answer for the same for_ts
+#       is rejected. When discuss=true, Ace's post is ALSO queued for the
+#       Grok/Gemini fan-out (single round). Bot replies never re-enter
+#       the queue, so a discuss post yields at most one bot round.
+# Funnel harden: after Rail+Anchor brief, a server watchdog posts an
+# honest Ace timeout bubble if synthesis never arrives — never silent drop.
 @app.get("/api/ace-inbox")
 async def ace_inbox(token: str = "", since: str = ""):
     if token != DESK_TOKEN:
@@ -425,7 +610,45 @@ async def ace_inbox(token: str = "", since: str = ""):
                 if m.get("from") == "shavor"
                 and "@ace" in m.get("text", "").lower()
                 and m.get("ts", "") > since]
+        # Attach open funnel jobs Ace still owes a synthesis for.
+        # Include even if older than `since` so a busy poller cannot miss
+        # a one-answer question that never got an Ace bubble.
+        open_by_ts = {p["for_ts"]: p for p in list_open_funnels()}
+        seen = {m.get("ts") for m in msgs}
+        for m in history:
+            ts = m.get("ts")
+            if m.get("from") != "shavor" or not m.get("funnel"):
+                continue
+            if ts not in open_by_ts:
+                continue
+            if ts in seen:
+                # Enrich an @ace+funnel hit with takes.
+                for i, existing in enumerate(msgs):
+                    if existing.get("ts") == ts:
+                        enriched = dict(existing)
+                        enriched["needs_synthesis"] = True
+                        enriched["funnel"] = True
+                        enriched["takes"] = open_by_ts[ts].get("takes") or {}
+                        msgs[i] = enriched
+                        break
+                continue
+            payload = dict(m)
+            payload["needs_synthesis"] = True
+            payload["funnel"] = True
+            payload["takes"] = open_by_ts[ts].get("takes") or {}
+            msgs.append(payload)
+            seen.add(ts)
+    msgs.sort(key=lambda m: m.get("ts") or "")
     return JSONResponse({"messages": msgs})
+
+
+@app.get("/api/ace-funnel")
+async def ace_funnel(token: str = ""):
+    """Open one-answer jobs waiting for Ace synthesis."""
+    if token != DESK_TOKEN:
+        return JSONResponse({"error": "bad token"}, status_code=403)
+    return JSONResponse({"pending": list_open_funnels(),
+                         "timeout_sec": ACE_FUNNEL_TIMEOUT_SEC})
 
 
 @app.post("/api/memory")
@@ -513,14 +736,32 @@ async def ace_reply(request: Request):
     if body.get("funnel_answer") is True:
         # Marks this as the single synthesized answer to a funnel question
         # so the bridge never synthesizes the same question twice.
+        for_ts = str(body.get("for_ts") or "")
         entry["funnel_answer"] = True
-        entry["for_ts"] = str(body.get("for_ts") or "")
+        entry["for_ts"] = for_ts
+        async with _pending_funnels_lock:
+            if for_ts and _funnel_answered(for_ts):
+                return JSONResponse(
+                    {"error": "already answered", "for_ts": for_ts},
+                    status_code=409)
+            # Drop pending so the watchdog cannot also post while we write.
+            pend = (_pending_funnels.pop(for_ts, None)
+                    if for_ts else None)
+            cancel_task = pend.get("task") if pend else None
+        if cancel_task is not None:
+            cancel_task.cancel()
     await remember(entry)
     bcast = {"type": "reply", "provider": "ace",
              "round": 1, "text": text, "ts": entry["ts"]}
     if attachment:
         bcast["attachment"] = attachment
+    if entry.get("funnel_answer"):
+        bcast["funnel_answer"] = True
+        bcast["for_ts"] = entry.get("for_ts") or ""
     await room.broadcast(bcast)
+    if entry.get("funnel_answer"):
+        await room.broadcast({"type": "status", "provider": "ace",
+                              "state": "done"})
     # Two-way discussion: when the caller sets discuss=true, Ace's post is
     # also queued for the Grok/Gemini fan-out so Rail and Anchor respond.
     # Framed so the providers know the speaker is Ace, not Shavor.
