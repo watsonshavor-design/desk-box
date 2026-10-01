@@ -1379,7 +1379,10 @@ function looksLikeWeather(text){
 async function ensureSendLocation(text){
   const want = looksLikeWeather(text) || !!window.__deskConversational || !!conversationalOn;
   if (!want) return window.__deskLocation || null;
-  if (window.__deskLocation && window.__deskLocation.status === "ok") return window.__deskLocation;
+  const fresh = (typeof window.deskLocationFresh === "function")
+    ? window.deskLocationFresh(window.__deskLocation)
+    : (window.__deskLocation && window.__deskLocation.status === "ok");
+  if (fresh) return window.__deskLocation;
   if (typeof window.deskEnsureLocation === "function") {
     try {
       return await window.deskEnsureLocation({ ask: looksLikeWeather(text) });

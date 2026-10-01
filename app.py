@@ -959,6 +959,13 @@ async def ws_endpoint(ws: WebSocket):
                         format_location_weather_block(location, weather)
                         + "\n\n" + bot_text
                     )
+                elif looks_like_weather(text):
+                    bot_text = (
+                        "[No device location was provided. Do not invent a "
+                        "temperature, city, or forecast. Tell Shavor you need "
+                        "location enabled on the phone, or ask for a city name.]"
+                        "\n\n" + bot_text
+                    )
                 await msg_queue.put({"text": bot_text, "crosstalk": crosstalk,
                                      "image": image, "funnel": funnel,
                                      "for_ts": entry["ts"]})
