@@ -1084,7 +1084,17 @@ function startBrowserConversational(){
     convRec.onresult = (ev) => {
       const t = (ev.results[0] && ev.results[0][0] && ev.results[0][0].transcript) || "";
       const cmd = stripWake(t);
-      if (cmd) window.deskConversationalUtterance(cmd);
+      if (cmd) {
+        window.deskConversationalUtterance(cmd);
+        return;
+      }
+      // Wake phrase only ("Hey Desk" / "Desk"): acknowledge instead of dropping silently.
+      const bare = String(t || "").trim().replace(/[,.:;\-]+$/g, "").trim().toLowerCase();
+      if (bare === "hey desk" || bare === "desk") {
+        const prompt = "Yes? What do you want to ask?";
+        if (typeof showToast === "function") showToast(prompt);
+        try { speak("ace", prompt); } catch (e) {}
+      }
     };
     convRec.onend = () => { if (conversationalOn) setTimeout(loop, 280); };
     convRec.onerror = () => { if (conversationalOn) setTimeout(loop, 800); };
