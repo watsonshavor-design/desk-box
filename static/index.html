@@ -1289,8 +1289,15 @@ function startBrowserConversational(){
 (function wireConversationalSwitch(){
   const sw = document.getElementById("conversationalSwitch");
   if (!sw || sw.dataset.roomConv === "1") return;
+  // Mark ownership so Android native.js does not attach a second click handler
+  // that would re-invert aria-checked (beep then immediate OFF).
   sw.dataset.roomConv = "1";
-  sw.addEventListener("click", function(){
+  sw.setAttribute("data-room-conv", "1");
+  sw.addEventListener("click", function(e){
+    if (e) {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+    }
     const on = sw.getAttribute("aria-checked") !== "true";
     sw.setAttribute("aria-checked", on ? "true" : "false");
     if (window.DeskNative && DeskNative.setConversationalMode) {
@@ -1304,7 +1311,7 @@ function startBrowserConversational(){
     if (typeof showToast === "function") {
       showToast(on ? 'Conversational on — say "Hey Desk …"' : "Conversational off");
     }
-  });
+  }, true);
 })();
 
 // Hide the web mic only when this browser has no SR and no native bridge.
@@ -1364,12 +1371,48 @@ function connect(){
   };
 }
 
-function send(){
+function looksLikeWeather(text){
+  if (typeof window.deskLooksLikeWeather === "function") return window.deskLooksLikeWeather(text);
+  return /\b(weather|temperature|temp\b|forecast|humid|rain|snow|wind\b|how hot|how cold|degrees)\b/i.test(String(text||""));
+}
+
+async function ensureSendLocation(text){
+  const want = looksLikeWeather(text) || !!window.__deskConversational || !!conversationalOn;
+  if (!want) return window.__deskLocation || null;
+  if (window.__deskLocation && window.__deskLocation.status === "ok") return window.__deskLocation;
+  if (typeof window.deskEnsureLocation === "function") {
+    try {
+      return await window.deskEnsureLocation({ ask: looksLikeWeather(text) });
+    } catch (e) { return null; }
+  }
+  if (window.DeskNative && typeof DeskNative.getLocation === "function") {
+    try {
+      const raw = DeskNative.getLocation();
+      const loc = typeof raw === "string" ? JSON.parse(raw) : raw;
+      if (loc && loc.status === "ok") window.__deskLocation = loc;
+      return loc;
+    } catch (e) { return null; }
+  }
+  return null;
+}
+
+async function send(){
   const text = input.value.trim();
   if(!text || !ws || ws.readyState!==1) return;
-  ws.send(JSON.stringify({type:"user", text, crosstalk: xtalk.checked,
-                         funnel: funnelChk.checked}));
   input.value = "";
+  const payload = {type:"user", text, crosstalk: xtalk.checked, funnel: funnelChk.checked};
+  try {
+    const loc = await ensureSendLocation(text);
+    if (loc && loc.status === "ok" && typeof loc.lat === "number" && typeof loc.lng === "number") {
+      payload.location = {
+        lat: loc.lat,
+        lng: loc.lng,
+        accuracy_m: loc.accuracy_m || null,
+        city: loc.city || null
+      };
+    }
+  } catch (e) {}
+  ws.send(JSON.stringify(payload));
 }
 
 sendBtn.onclick = send;

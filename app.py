@@ -22,6 +22,8 @@ import json
 import logging
 import os
 import re
+
+import httpx
 import secrets
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -151,6 +153,99 @@ msg_queue = asyncio.Queue()  # one message processed at a time
 
 def now_iso():
     return datetime.now(timezone.utc).isoformat()
+
+
+_WEATHER_RE = re.compile(
+    r"\b(weather|temperature|temp\b|forecast|humid|rain|snow|wind\b|"
+    r"how hot|how cold|degrees)\b",
+    re.I,
+)
+
+
+def looks_like_weather(text: str) -> bool:
+    return bool(_WEATHER_RE.search(text or ""))
+
+
+def sanitize_location(raw):
+    """Accept client lat/lng/city only — never invent coordinates."""
+    if not isinstance(raw, dict):
+        return None
+    try:
+        lat = float(raw.get("lat"))
+        lng = float(raw.get("lng"))
+    except (TypeError, ValueError):
+        return None
+    if not (-90.0 <= lat <= 90.0 and -180.0 <= lng <= 180.0):
+        return None
+    out = {"lat": round(lat, 5), "lng": round(lng, 5)}
+    city = raw.get("city")
+    if isinstance(city, str) and city.strip():
+        out["city"] = city.strip()[:80]
+    acc = raw.get("accuracy_m")
+    if isinstance(acc, (int, float)) and acc >= 0:
+        out["accuracy_m"] = round(float(acc), 1)
+    return out
+
+
+async def fetch_open_meteo(lat: float, lng: float) -> dict:
+    """Live weather from Open-Meteo. Never invents temperatures on failure."""
+    url = (
+        "https://api.open-meteo.com/v1/forecast"
+        f"?latitude={lat}&longitude={lng}"
+        "&current=temperature_2m,apparent_temperature,relative_humidity_2m,"
+        "precipitation,weather_code,wind_speed_10m"
+        "&temperature_unit=fahrenheit&wind_speed_unit=mph&timezone=auto"
+    )
+    try:
+        async with httpx.AsyncClient(timeout=8.0) as client:
+            r = await client.get(url)
+            r.raise_for_status()
+            data = r.json()
+        cur = data.get("current") or {}
+        if "temperature_2m" not in cur:
+            return {"ok": False, "error": "no current observation"}
+        return {
+            "ok": True,
+            "source": "open-meteo",
+            "latitude": data.get("latitude", lat),
+            "longitude": data.get("longitude", lng),
+            "timezone": data.get("timezone"),
+            "temperature_f": cur.get("temperature_2m"),
+            "feels_like_f": cur.get("apparent_temperature"),
+            "humidity_pct": cur.get("relative_humidity_2m"),
+            "precipitation": cur.get("precipitation"),
+            "weather_code": cur.get("weather_code"),
+            "wind_mph": cur.get("wind_speed_10m"),
+            "observed_at": cur.get("time"),
+        }
+    except Exception as e:
+        return {"ok": False, "error": str(e)[:200]}
+
+
+def format_location_weather_block(location, weather=None):
+    city = location.get("city") or f"{location['lat']},{location['lng']}"
+    lines = [
+        f"[Device location: {city} (lat {location['lat']}, lng {location['lng']}).]"
+    ]
+    if weather and weather.get("ok"):
+        lines.append(
+            "[Live weather via Open-Meteo — use these numbers; do not invent temps: "
+            f"{weather.get('temperature_f')}°F"
+            f" (feels {weather.get('feels_like_f')}°F), "
+            f"humidity {weather.get('humidity_pct')}%, "
+            f"wind {weather.get('wind_mph')} mph, "
+            f"precip {weather.get('precipitation')}, "
+            f"code {weather.get('weather_code')}, "
+            f"as of {weather.get('observed_at')} {weather.get('timezone')}.]"
+        )
+    elif weather and not weather.get("ok"):
+        lines.append(
+            "[Live weather fetch failed — say you could not get a reading; "
+            "do not invent a temperature. "
+            f"Error: {weather.get('error')}]"
+        )
+    return "\n".join(lines)
+
 
 
 def append_log(entry):
@@ -551,6 +646,18 @@ async def desk(token: str = ""):
     return JSONResponse(DESK_CONTEXT)
 
 
+@app.get("/api/weather")
+async def weather(token: str = "", lat: float = 0.0, lng: float = 0.0):
+    """Live Open-Meteo reading for Ace / room. No invented temperatures."""
+    if token != DESK_TOKEN:
+        return JSONResponse({"error": "bad token"}, status_code=403)
+    location = sanitize_location({"lat": lat, "lng": lng})
+    if not location:
+        return JSONResponse({"ok": False, "error": "lat/lng required"}, status_code=400)
+    reading = await fetch_open_meteo(location["lat"], location["lng"])
+    return JSONResponse({"location": location, "weather": reading})
+
+
 @app.get("/api/gainers")
 async def gainers(token: str = "", source: str = "combined", force: str = ""):
     """Live top-gainers. Webull via public ranking API; Moomoo via OpenAPI
@@ -819,15 +926,20 @@ async def ws_endpoint(ws: WebSocket):
                 funnel = bool(msg.get("funnel"))
                 attachment, image, kind = resolve_attachment(
                     msg.get("attachment"))
+                location = sanitize_location(msg.get("location"))
                 entry = {"from": "shavor", "text": text, "ts": now_iso()}
                 if funnel:
                     entry["funnel"] = True
                 if attachment:
                     entry["attachment"] = attachment
+                if location:
+                    entry["location"] = location
                 await remember(entry)
                 bcast = {"type": "user", "text": text, "ts": entry["ts"]}
                 if attachment:
                     bcast["attachment"] = attachment
+                if location:
+                    bcast["location"] = location
                 await room.broadcast(bcast)
                 # Bots get the photo itself (vision); video is acknowledged
                 # in words since the providers only take images.
@@ -838,6 +950,15 @@ async def ws_endpoint(ws: WebSocket):
                     bot_text = (bot_text + "\n\n[Shavor shared a video.]"
                                 if bot_text else
                                 "[Shavor shared a video — acknowledge it.]")
+                if location:
+                    weather = None
+                    if looks_like_weather(text):
+                        weather = await fetch_open_meteo(
+                            location["lat"], location["lng"])
+                    bot_text = (
+                        format_location_weather_block(location, weather)
+                        + "\n\n" + bot_text
+                    )
                 await msg_queue.put({"text": bot_text, "crosstalk": crosstalk,
                                      "image": image, "funnel": funnel,
                                      "for_ts": entry["ts"]})
