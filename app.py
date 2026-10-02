@@ -730,6 +730,54 @@ async def gainers(token: str = "", source: str = "combined", force: str = ""):
     return JSONResponse(payload)
 
 
+@app.post("/api/gainers/ingest")
+async def gainers_ingest(request: Request):
+    """Accept local OpenD (or other) top-gainers push into Moomoo cache.
+
+    Railway cannot reach OpenD on the trading box (127.0.0.1:11111), so a
+    5-minute cron on that box POSTs here. Token-authed. Does not touch the
+    Webull live path. Body:
+      {"token": "...", "source": "moomoo", "items": [...],
+       "status"?, "message"?, "updated_at"?, "auth"?, "opend"?, "reason"?}
+    """
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "invalid json"}, status_code=400)
+    if not isinstance(body, dict) or body.get("token") != DESK_TOKEN:
+        return JSONResponse({"error": "bad token"}, status_code=403)
+    source = str(body.get("source") or "moomoo").strip().lower() or "moomoo"
+    if source not in ("moomoo", "webull"):
+        return JSONResponse({"error": "source must be moomoo or webull"}, status_code=400)
+    items = body.get("items")
+    if items is None:
+        return JSONResponse({"error": "items required (list)"}, status_code=400)
+    if not isinstance(items, list):
+        return JSONResponse({"error": "items must be a list"}, status_code=400)
+    if len(items) > 200:
+        items = items[:200]
+    stored = gainers_mod.ingest_gainers(
+        source,
+        items,
+        status=body.get("status"),
+        message=body.get("message"),
+        updated_at=body.get("updated_at"),
+        auth=body.get("auth"),
+        opend=body.get("opend"),
+        endpoint=body.get("endpoint"),
+        reason=body.get("reason"),
+    )
+    return JSONResponse({
+        "ok": True,
+        "source": source,
+        "count": len(stored.get("items") or []),
+        "status": stored.get("status"),
+        "message": stored.get("message"),
+        "updated_at": stored.get("updated_at"),
+        "auth": stored.get("auth"),
+    })
+
+
 # --- Ace / CoS bridges ----------------------------------------------------
 # There is no API for Muse, so Ace joins the room through these endpoints:
 #   GET  /api/ace-inbox?token=...&since=<iso-ts> -> {"messages": [...]}

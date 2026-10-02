@@ -16,6 +16,12 @@ Moomoo (preferred: gateway-free OpenAPI at webapi.moomoo.com):
   set but the private key is missing. Falls back to classic OpenD
   get_top_movers_rank when OpenAPI creds are absent and OpenD is reachable
   at MOOMOO_OPEND_HOST:MOOMOO_OPEND_PORT.
+
+Ingest (Railway path):
+  Local OpenD cannot be reached from Railway. A token-authed
+  POST /api/gainers/ingest lets the trading box push Moomoo rows into an
+  in-memory cache; GET /api/gainers?source=moomoo prefers that cache when
+  fresh so the Moomoo tab stays populated.
 """
 from __future__ import annotations
 
@@ -44,6 +50,10 @@ _SORT_DESC = 2
 _PRICE_MULT = 1000.0
 
 CACHE_TTL_SEC = 120
+# Ingested Moomoo rows from the local OpenD pusher. Prefer while fresh;
+# still serve (marked stale) so Last checked is never silent.
+INGEST_FRESH_SEC = 600       # 10 min — prefer ingest over live OpenAPI
+INGEST_STALE_SHOW_SEC = 3600  # 60 min — still show with stale banner
 WEBULL_URL = (
     "https://quotes-gw.webullfintech.com/api/wlas/ranking/topGainers"
 )
@@ -70,6 +80,9 @@ _cache: dict[str, dict[str, Any]] = {
     "webull": {},
     "moomoo": {},
 }
+# Local OpenD → Railway ingest cache (separate from live OpenAPI/OpenD fetch).
+# Shape matches live payloads + ingested_mono / ingest_source.
+_ingest_cache: dict[str, dict[str, Any]] = {}
 
 
 def _now_iso() -> str:
@@ -715,6 +728,115 @@ async def fetch_moomoo() -> dict[str, Any]:
     return await asyncio.to_thread(_fetch_moomoo_sync)
 
 
+
+def ingest_gainers(
+    source: str,
+    items: list[dict[str, Any]] | None,
+    *,
+    status: str | None = None,
+    message: str | None = None,
+    updated_at: str | None = None,
+    auth: str | None = None,
+    opend: str | None = None,
+    endpoint: str | None = None,
+    reason: str | None = None,
+) -> dict[str, Any]:
+    """Store a pusher payload for source (typically moomoo). Sync-safe."""
+    src = (source or "moomoo").strip().lower()
+    if src not in ("moomoo", "webull"):
+        src = "moomoo"
+    clean: list[dict[str, Any]] = []
+    for raw in items or []:
+        if not isinstance(raw, dict):
+            continue
+        sym = str(raw.get("symbol") or "").strip().upper()
+        if not sym:
+            continue
+        row = dict(raw)
+        row["symbol"] = sym
+        row.setdefault("source", src)
+        row.setdefault("sources", [src])
+        clean.append(row)
+    if status is None:
+        status = "ok" if clean else "empty"
+    if message is None:
+        message = (
+            f"Moomoo US top movers via local OpenD ingest ({len(clean)} names)"
+            if src == "moomoo" and clean
+            else (
+                f"{src} ingest empty"
+                if not clean
+                else f"{src} ingest ({len(clean)} names)"
+            )
+        )
+    payload: dict[str, Any] = {
+        "items": clean,
+        "status": status,
+        "message": message,
+        "updated_at": updated_at or _now_iso(),
+        "fetched_mono": time.monotonic(),
+        "ingested_mono": time.monotonic(),
+        "ingest_source": "local_opend_push",
+        "auth": auth or "opend_ingest",
+    }
+    if opend:
+        payload["opend"] = opend
+    if endpoint:
+        payload["endpoint"] = endpoint
+    if reason:
+        payload["reason"] = reason
+    # Store under lock via sync assignment — callers are async route or tests;
+    # Python dict assign is atomic enough; get_gainers reads under _lock.
+    _ingest_cache[src] = payload
+    return {k: v for k, v in payload.items() if k not in ("fetched_mono", "ingested_mono")}
+
+
+def _ingest_age_sec(entry: dict[str, Any]) -> float | None:
+    mono = entry.get("ingested_mono") or entry.get("fetched_mono")
+    if mono is None:
+        return None
+    return time.monotonic() - float(mono)
+
+
+def peek_ingest(source: str) -> dict[str, Any] | None:
+    """Return ingest payload without mono clocks, or None if missing/expired."""
+    src = (source or "").strip().lower()
+    entry = _ingest_cache.get(src) or {}
+    if not entry:
+        return None
+    age = _ingest_age_sec(entry)
+    if age is None or age > INGEST_STALE_SHOW_SEC:
+        return None
+    out = {k: v for k, v in entry.items() if k not in ("fetched_mono", "ingested_mono")}
+    out["_ingest_age_sec"] = age
+    out["_ingest_fresh"] = age <= INGEST_FRESH_SEC
+    if age > INGEST_FRESH_SEC:
+        # Keep rows visible; stamp honesty into message for Last checked UX.
+        base = out.get("message") or f"{src} ingest"
+        out["message"] = f"{base} (stale ingest · {int(age)}s old — waiting for next local push)"
+        if out.get("status") == "ok":
+            out["status"] = "partial"
+    return out
+
+
+async def _moomoo_with_ingest(*, force: bool = False) -> dict[str, Any]:
+    """Prefer local OpenD ingest cache for Moomoo; fall back to live fetch."""
+    ingest = peek_ingest("moomoo")
+    if ingest and ingest.get("_ingest_fresh") and not force:
+        return {k: v for k, v in ingest.items() if not k.startswith("_")}
+
+    live = await _get_cached("moomoo", force=force)
+    live_ok = (live.get("status") == "ok") and bool(live.get("items"))
+
+    if live_ok:
+        return live
+
+    if ingest:
+        # Live empty/not_connected/error — serve ingest (fresh or stale banner).
+        return {k: v for k, v in ingest.items() if not k.startswith("_")}
+
+    return live
+
 def _stale(entry: dict[str, Any]) -> bool:
     if not entry:
         return True
@@ -921,10 +1043,10 @@ async def get_gainers(source: str = "combined", force: bool = False) -> dict[str
         if src == "webull":
             return await _get_cached("webull", force=force)
         if src == "moomoo":
-            return await _get_cached("moomoo", force=force)
+            return await _moomoo_with_ingest(force=force)
         webull, moomoo = await asyncio.gather(
             _get_cached("webull", force=force),
-            _get_cached("moomoo", force=force),
+            _moomoo_with_ingest(force=force),
         )
         return _merge(webull, moomoo)
 
@@ -943,11 +1065,19 @@ async def get_gainers(source: str = "combined", force: bool = False) -> dict[str
                 "updated_at": _now_iso(),
             }
         elif src == "moomoo":
-            data = m or {
-                "items": [], "status": "error",
-                "message": "Moomoo feed timed out — try Refresh again",
-                "updated_at": _now_iso(),
-            }
+            ingest = peek_ingest("moomoo")
+            if ingest:
+                data = {k: v for k, v in ingest.items() if not k.startswith("_")}
+                data["message"] = (
+                    (data.get("message") or "Moomoo ingest")
+                    + " — live refresh timed out, showing ingest"
+                )
+            else:
+                data = m or {
+                    "items": [], "status": "error",
+                    "message": "Moomoo feed timed out — try Refresh again",
+                    "updated_at": _now_iso(),
+                }
         else:
             data = _merge(
                 w or {"items": [], "status": "error", "message": "Webull timed out"},
