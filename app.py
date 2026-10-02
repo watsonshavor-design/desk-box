@@ -307,6 +307,157 @@ def retention_cutoff():
             - timedelta(days=RETENTION_DAYS)).isoformat()
 
 
+# Prior room threads live beside the live log on the durable volume.
+# Live feed is desk-log.jsonl; archives are never loaded back into history.
+ARCHIVE_DIR = os.path.join(DATA_DIR, "archives")
+ARCHIVE_INDEX = os.path.join(ARCHIVE_DIR, "index.json")
+ARCHIVE_ID_RE = re.compile(r"^feed-\d{8}T\d{6}Z(?:-\d+)?$")
+
+
+def _load_archive_index():
+    try:
+        with open(ARCHIVE_INDEX) as f:
+            data = json.load(f)
+        if isinstance(data, list):
+            return [m for m in data if isinstance(m, dict) and m.get("id")]
+    except (OSError, json.JSONDecodeError):
+        pass
+    return []
+
+
+def _save_archive_index(index):
+    os.makedirs(ARCHIVE_DIR, exist_ok=True)
+    tmp = ARCHIVE_INDEX + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(index, f)
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp, ARCHIVE_INDEX)
+
+
+def list_archives():
+    """Index plus any jsonl files the index missed. No message bodies."""
+    by_id = {}
+    for meta in _load_archive_index():
+        aid = str(meta.get("id") or "")
+        if ARCHIVE_ID_RE.match(aid):
+            by_id[aid] = {
+                "id": aid,
+                "count": int(meta.get("count") or 0),
+                "archived_at": meta.get("archived_at") or "",
+                "note": meta.get("note") or "",
+                "first_ts": meta.get("first_ts") or "",
+                "last_ts": meta.get("last_ts") or "",
+            }
+    try:
+        names = os.listdir(ARCHIVE_DIR)
+    except OSError:
+        names = []
+    for name in names:
+        if not name.endswith(".jsonl"):
+            continue
+        aid = name[:-6]
+        if not ARCHIVE_ID_RE.match(aid) or aid in by_id:
+            continue
+        path = os.path.join(ARCHIVE_DIR, name)
+        count = 0
+        first_ts = last_ts = ""
+        try:
+            with open(path) as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    count += 1
+                    try:
+                        e = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    ts = e.get("ts") or ""
+                    if ts and not first_ts:
+                        first_ts = ts
+                    if ts:
+                        last_ts = ts
+        except OSError:
+            continue
+        by_id[aid] = {
+            "id": aid, "count": count, "archived_at": "",
+            "note": "", "first_ts": first_ts, "last_ts": last_ts,
+        }
+    return [by_id[k] for k in sorted(by_id)]
+
+
+def read_archive(archive_id):
+    if not ARCHIVE_ID_RE.match(archive_id or ""):
+        return None
+    path = os.path.join(ARCHIVE_DIR, archive_id + ".jsonl")
+    if not os.path.isfile(path):
+        return None
+    messages = []
+    with open(path) as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                e = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(e, dict):
+                messages.append(e)
+    return messages
+
+
+def _write_archive(entries, note):
+    """Copy entries to a new archive file. Does not touch the live log."""
+    os.makedirs(ARCHIVE_DIR, exist_ok=True)
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    aid = f"feed-{stamp}"
+    n = 2
+    while os.path.exists(os.path.join(ARCHIVE_DIR, aid + ".jsonl")):
+        aid = f"feed-{stamp}-{n}"
+        n += 1
+    path = os.path.join(ARCHIVE_DIR, aid + ".jsonl")
+    tmp = path + ".tmp"
+    with open(tmp, "w") as f:
+        for e in entries:
+            f.write(json.dumps(e, ensure_ascii=False) + "\n")
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp, path)
+    meta = {
+        "id": aid,
+        "count": len(entries),
+        "archived_at": now_iso(),
+        "note": (note or "")[:200],
+        "first_ts": entries[0].get("ts") if entries else "",
+        "last_ts": entries[-1].get("ts") if entries else "",
+    }
+    index = _load_archive_index()
+    index.append(meta)
+    _save_archive_index(index)
+    return meta
+
+
+def _truncate_live_log():
+    tmp = LOG_PATH + ".tmp"
+    with open(tmp, "w") as f:
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp, LOG_PATH)
+
+
+async def archive_and_reset(note=""):
+    """Copy the live room, then clear it. Archive failure leaves the room."""
+    async with history_lock:
+        entries = list(history)
+        meta = _write_archive(entries, note)
+        _truncate_live_log()
+        del history[:]
+    await room.broadcast({"type": "history", "messages": []})
+    return meta
+
+
 class Room:
     """Tracks connected browsers; broadcasts to all of them."""
 
@@ -668,7 +819,7 @@ async def on_startup():
 @app.get("/api/health")
 async def health():
     """Liveness only — no token, no secrets."""
-    return JSONResponse({"ok": True, "service": "desk-box"})
+    return JSONResponse({"ok": True, "service": "desk-box", "archive": True})
 
 @app.get("/")
 async def index(token: str = ""):
@@ -1054,6 +1205,43 @@ async def cos_reply(request: Request):
                              "image": image, "funnel": False,
                              "for_ts": entry["ts"]})
     return JSONResponse({"ok": True})
+
+
+@app.post("/api/archive-feed")
+async def archive_feed(request: Request, token: str = ""):
+    """Copy the live room onto the volume, then start an empty live feed."""
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    if not isinstance(body, dict):
+        body = {}
+    if (body.get("token") or token) != DESK_TOKEN:
+        return JSONResponse({"error": "bad token"}, status_code=403)
+    note = str(body.get("note") or "")[:200]
+    try:
+        meta = await archive_and_reset(note)
+    except OSError:
+        log.warning("archive-feed failed")
+        return JSONResponse({"error": "archive failed"}, status_code=500)
+    return JSONResponse({"ok": True, **meta})
+
+
+@app.get("/api/archives")
+async def archives(token: str = ""):
+    if token != DESK_TOKEN:
+        return JSONResponse({"error": "bad token"}, status_code=403)
+    return JSONResponse({"archives": list_archives()})
+
+
+@app.get("/api/archive/{archive_id}")
+async def archive_one(archive_id: str, token: str = ""):
+    if token != DESK_TOKEN:
+        return JSONResponse({"error": "bad token"}, status_code=403)
+    messages = read_archive(archive_id)
+    if messages is None:
+        return JSONResponse({"error": "not found"}, status_code=404)
+    return JSONResponse({"id": archive_id, "messages": messages})
 
 
 @app.get("/api/recent")

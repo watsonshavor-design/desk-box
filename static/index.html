@@ -186,7 +186,7 @@
     .chat-panel { border-radius:var(--radius-lg); overflow:hidden; min-height:660px; display:flex; flex-direction:column; }
     .chat-toolbar { padding:15px 18px; border-bottom:1px solid var(--line); display:flex; justify-content:space-between; gap:12px; align-items:center; }
     .personas { display:flex; gap:6px; flex-wrap:wrap; }
-    .filter-chip { border:1px solid var(--line); background:transparent; color:var(--muted); padding:6px 9px; border-radius:20px; font-size:11px; font-weight:700; cursor:pointer; }
+    .filter-chip, .archive-link { border:1px solid var(--line); background:transparent; color:var(--muted); padding:6px 9px; border-radius:20px; font-size:11px; font-weight:700; cursor:pointer; }
     .filter-chip.active { background:var(--surface-3); color:var(--ink); }
     .mode-inline { display:flex; align-items:center; gap:9px; font-size:11px; color:var(--muted); font-weight:600; }
     .mode-inline-group { display:flex; align-items:center; gap:14px; flex-wrap:wrap; justify-content:flex-end; }
@@ -571,7 +571,7 @@
         <div class="chat-layout">
           <article class="card chat-panel">
             <div class="chat-toolbar">
-              <div class="personas" aria-label="Message filters"><button class="filter-chip active" data-filter="all">All</button><button class="filter-chip" data-filter="ace">Ace</button><button class="filter-chip" data-filter="cos">CoS</button><button class="filter-chip" data-filter="rail">Rail</button><button class="filter-chip" data-filter="anchor">Anchor</button></div>
+              <div class="personas" aria-label="Message filters"><button class="filter-chip active" data-filter="all">All</button><button class="filter-chip" data-filter="ace">Ace</button><button class="filter-chip" data-filter="cos">CoS</button><button class="filter-chip" data-filter="rail">Rail</button><button class="filter-chip" data-filter="anchor">Anchor</button><button type="button" class="archive-link" id="priorFeedBtn">Prior feed</button></div>
               <div class="mode-inline-group">
                 <label class="mode-inline">One answer <button class="switch mode-switch" role="switch" aria-checked="true" aria-label="Toggle one-answer mode"></button></label>
                 <label class="mode-inline">Conversational <button type="button" class="switch" id="conversationalSwitch" role="switch" aria-checked="false" aria-label="Toggle conversational mode"></button></label>
@@ -1396,6 +1396,15 @@ function setThinking(provider, state){
   } else if(el){ el.remove(); }
 }
 
+var viewingArchive = false;
+function paintHistory(messages){
+  log.innerHTML="";
+  (messages||[]).forEach(x=>{
+    if(x.hidden) return;
+    if(x.from==="shavor") addMsg("me", x.text, null, x.ts, x.attachment);
+    else addMsg(x.from, x.text, x.round, x.ts, x.attachment);
+  });
+}
 function connect(){
   const proto = location.protocol === "https:" ? "wss" : "ws";
   ws = new WebSocket(`${proto}://${location.host}/ws?token=${encodeURIComponent(token)}`);
@@ -1405,10 +1414,11 @@ function connect(){
                        sendBtn.disabled=true; setTimeout(connect, 2500); };
   ws.onmessage = (ev) => {
     const m = JSON.parse(ev.data);
-    if(m.type==="history"){ log.innerHTML=""; (m.messages||[]).forEach(x=>{
-        if(x.hidden) return;  // funnel takes stay backstage — Ace synthesizes them
-        if(x.from==="shavor") addMsg("me", x.text, null, x.ts, x.attachment);
-        else addMsg(x.from, x.text, x.round, x.ts); }); }
+    if(viewingArchive && m.type!=="history") return;
+    if(m.type==="history"){
+        if(viewingArchive) return;
+        paintHistory(m.messages);
+    }
     else if(m.type==="user"){ addMsg("me", m.text, null, m.ts, m.attachment); }
     else if(m.type==="status"){ setThinking(m.provider, m.state);
         if(m.state==="error") addMsg(m.provider, "⚠ " + (m.detail||"request failed"), null, null); }
@@ -1571,6 +1581,46 @@ fetch("/api/desk?token="+encodeURIComponent(token)).then(r=>r.json()).then(d=>{
 
 sendBtn.disabled = true;
 connect();
+
+var priorBtn = document.getElementById("priorFeedBtn");
+if(priorBtn) priorBtn.onclick = async () => {
+  if(viewingArchive){
+    viewingArchive = false;
+    priorBtn.textContent = "Prior feed";
+    try { if(ws) ws.close(); } catch(e) {}
+    return;
+  }
+  try {
+    const r = await fetch("/api/archives?token="+encodeURIComponent(token));
+    if(!r.ok) throw new Error("list");
+    const d = await r.json();
+    const list = d.archives || [];
+    if(!list.length){
+      addMsg("cos", "No prior feed is archived yet.", null, null);
+      return;
+    }
+    const latest = list[list.length-1];
+    const r2 = await fetch("/api/archive/"+encodeURIComponent(latest.id)+"?token="+encodeURIComponent(token));
+    if(!r2.ok) throw new Error("read");
+    const d2 = await r2.json();
+    viewingArchive = true;
+    priorBtn.textContent = "Live feed";
+    log.innerHTML = "";
+    const banner = document.createElement("div");
+    banner.className = "thinking";
+    banner.textContent = "Archived feed · " + (latest.count||0) + " messages";
+    log.appendChild(banner);
+    (d2.messages||[]).forEach(x=>{
+      if(x.hidden) return;
+      if(x.from==="shavor") addMsg("me", x.text, null, x.ts, x.attachment);
+      else addMsg(x.from, x.text, x.round, x.ts, x.attachment);
+    });
+  } catch(e) {
+    viewingArchive = false;
+    priorBtn.textContent = "Prior feed";
+    addMsg("cos", "Couldn't open the archived feed.", null, null);
+  }
+};
 
 </script>
 </body>
