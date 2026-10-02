@@ -748,7 +748,7 @@
       }
       function summarizeFeed(data){
         var status = (data && data.status) || 'not_connected';
-        var items = (data && data.items) || [];
+        var items = ((data && data.items) || []).slice(0, 15);
         var label = (data && data.label) || '';
         var message = (data && data.message) || '';
         var sources = (data && data.sources) || null;

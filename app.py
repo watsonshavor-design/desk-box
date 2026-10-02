@@ -776,8 +776,8 @@ async def gainers_ingest(request: Request):
             items = entry.get("items")
             if not isinstance(items, list):
                 items = []
-            if len(items) > 200:
-                items = items[:200]
+            if len(items) > gainers_mod.GAINERS_LIST_CAP:
+                items = items[:gainers_mod.GAINERS_LIST_CAP]
             cleaned.append({**entry, "items": items})
         results = gainers_mod.ingest_gainers_batch(source, cleaned)
         return JSONResponse({
@@ -796,8 +796,8 @@ async def gainers_ingest(request: Request):
         )
     if not isinstance(items, list):
         return JSONResponse({"error": "items must be a list"}, status_code=400)
-    if len(items) > 200:
-        items = items[:200]
+    if len(items) > gainers_mod.GAINERS_LIST_CAP:
+        items = items[:gainers_mod.GAINERS_LIST_CAP]
     lt = body.get("list_type") or body.get("list") or "today"
     stored = gainers_mod.ingest_gainers(
         source,

@@ -5,7 +5,7 @@ items with a clear status/message.
 
 Webull (works from Railway, no API key):
   GET https://quotes-gw.webullfintech.com/api/wlas/ranking/topGainers
-      ?regionId=6&rankType=1d&pageIndex=1&pageSize=50
+      ?regionId=6&rankType=1d&pageIndex=1&pageSize=15
   Unofficial but stable public ranking endpoint used widely in the industry
   (same path as webull_unofficial / quotes-gw). regionId=6 = US.
 
@@ -56,6 +56,9 @@ CACHE_TTL_SEC = 120
 # still serve (marked stale) so Last checked is never silent.
 INGEST_FRESH_SEC = 600       # 10 min — prefer ingest over live OpenAPI
 INGEST_STALE_SHOW_SEC = 3600  # 60 min — still show with stale banner
+# Ace/Shavor: every gainers list (premarket/today/afterhours, Webull,
+# Moomoo, Combined) is capped at 15 names before cache and API response.
+GAINERS_LIST_CAP = 15
 LIST_TYPES = ("premarket", "today", "afterhours")
 LIST_TYPE_ALIASES = {
     "pre": "premarket",
@@ -93,11 +96,11 @@ WEBULL_PARAMS = {
     "regionId": 6,       # US
     "rankType": "1d",    # 1-day change
     "pageIndex": 1,
-    "pageSize": 50,
+    "pageSize": GAINERS_LIST_CAP,
 }
 WEBULL_DOC = (
     "https://quotes-gw.webullfintech.com/api/wlas/ranking/topGainers"
-    "?regionId=6&rankType=1d&pageIndex=1&pageSize=50"
+    "?regionId=6&rankType=1d&pageIndex=1&pageSize=15"
 )
 
 LABELS = {
@@ -134,6 +137,14 @@ def _cache_key(source: str, list_type: str) -> str:
 
 def _ingest_key(source: str, list_type: str) -> str:
     return _cache_key(source, list_type)
+
+
+def cap_items(items: list | None, cap: int = GAINERS_LIST_CAP) -> list:
+    """Keep the top `cap` rows already in rank order. Never pads."""
+    if not items:
+        return []
+    n = max(1, int(cap))
+    return list(items)[:n]
 
 
 
@@ -207,10 +218,11 @@ async def fetch_webull(list_type: str = "today") -> dict[str, Any]:
         "regionId": 6,
         "rankType": rank_type,
         "pageIndex": 1,
-        "pageSize": 50,
+        "pageSize": GAINERS_LIST_CAP,
     }
     endpoint = (
-        f"{WEBULL_URL}?regionId=6&rankType={rank_type}&pageIndex=1&pageSize=50"
+        f"{WEBULL_URL}?regionId=6&rankType={rank_type}"
+        f"&pageIndex=1&pageSize={GAINERS_LIST_CAP}"
     )
     session_label = LIST_LABELS.get(lt, lt)
     try:
@@ -266,6 +278,7 @@ async def fetch_webull(list_type: str = "today") -> dict[str, Any]:
         )
         row["list_type"] = lt
         items.append(row)
+    items = cap_items(items)
 
     return {
         "items": items,
@@ -465,7 +478,7 @@ def _fetch_moomoo_openapi() -> dict[str, Any] | None:
 
     # US top gainers via stock-screen sorted by PRICE_CHANGE_RATE DESC
     body_obj = {
-        "limit": 50,
+        "limit": GAINERS_LIST_CAP,
         "screen_queries": [
             {
                 "simple_field_query": {
@@ -642,6 +655,7 @@ def _fetch_moomoo_openapi() -> dict[str, Any] | None:
             )
         )
 
+    items = cap_items(items)
     return {
         "items": items,
         "status": "ok" if items else "empty",
@@ -717,7 +731,7 @@ def _fetch_moomoo_opend_sync() -> dict[str, Any]:
         ret, data = ctx.get_top_movers_rank(
             market=Market.US,
             sort_dir=RankSortDir.DESCENDING,
-            count=50,
+            count=GAINERS_LIST_CAP,
         )
         if ret != RET_OK:
             return {
@@ -749,6 +763,7 @@ def _fetch_moomoo_opend_sync() -> dict[str, Any]:
                     source="moomoo",
                 )
             )
+        items = cap_items(items)
         return {
             "items": items,
             "status": "ok" if items else "empty",
@@ -824,9 +839,12 @@ def ingest_gainers(
         row.setdefault("sources", [src])
         row["list_type"] = lt
         clean.append(row)
+    incoming_n = len(clean)
+    clean = cap_items(clean)
+    truncated = incoming_n > len(clean)
     if status is None:
         status = "ok" if clean else "empty"
-    if message is None:
+    if message is None or truncated:
         if src == "moomoo" and clean:
             message = (
                 f"Moomoo US {session_label} via local OpenD ingest "
@@ -1123,6 +1141,7 @@ def _merge(
         ),
         reverse=True,
     )
+    items = cap_items(items)
 
     w_status = (webull.get("status") or "not_connected").lower()
     m_status = (moomoo.get("status") or "not_connected").lower()
@@ -1345,7 +1364,7 @@ async def get_gainers(
         "source": src,
         "list_type": lt,
         "label": label,
-        "items": data.get("items") or [],
+        "items": cap_items(data.get("items") or []),
         "updated_at": data.get("updated_at") or _now_iso(),
         "status": data.get("status") or "not_connected",
         "message": data.get("message") or f"{src} feed not connected",
