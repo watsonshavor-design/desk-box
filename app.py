@@ -32,7 +32,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 
 from fastapi import FastAPI, File, Request, UploadFile, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from providers import PROVIDERS
@@ -875,6 +875,42 @@ _WMO = {
 _HEADLINE_FEEDS = (
     ("https://feeds.bbci.co.uk/news/rss.xml", "BBC News"),
     ("https://feeds.npr.org/1001/rss.xml", "NPR"),
+    ("https://www.theguardian.com/world/rss", "The Guardian"),
+)
+_HEADLINE_CAP = 60
+_HEADLINE_PER_FEED = 40
+# Same diamond-in-a-circle as the installed icon. Original fill sampled from icon-192.
+_MARK_BG = (13, 17, 23)
+_MARK_ORIGINAL = "#a371f7"
+_MARK_COLORS = {
+    "original": _MARK_ORIGINAL,
+    "green": "#34d399",
+    "teal": "#2dd4bf",
+    "violet": "#8b5cf6",
+    "mint": "#6ee7b7",
+    "indigo": "#818cf8",
+    "cyan": "#22d3ee",
+    "aurora": "#10b981",
+    "lilac": "#c4b5fd",
+    "sea": "#5eead4",
+    "emerald": "#059669",
+    "dusk": "#7c3aed",
+    "lagoon": "#14b8a6",
+}
+# Window 0 of every 30-day cycle is the original mark. Later windows recolor it.
+# Odd cycles use a second aurora palette after the return to original.
+_MARK_PALETTES = (
+    ("original", "green", "teal", "violet", "mint", "indigo", "cyan"),
+    ("original", "aurora", "lilac", "sea", "emerald", "dusk", "lagoon"),
+)
+_MARK_EPOCH = datetime(2026, 1, 1, tzinfo=ZoneInfo(TAYLORS_TZ)).date()
+_MARK_CYCLE_DAYS = 30
+_MARK_WINDOW_DAYS = 4  # stable 3–5 day hold; 4 keeps one image across that window
+_YOUTUBE_CLIENT_ENVS = (
+    "YOUTUBE_CLIENT_ID",
+    "GOOGLE_CLIENT_ID",
+    "GOOGLE_OAUTH_CLIENT_ID",
+    "YOUTUBE_OAUTH_CLIENT_ID",
 )
 
 
@@ -963,19 +999,40 @@ def _parse_rss_headlines(xml_bytes, source_name, limit=8):
     return out
 
 
+def _merge_headline_rows(batches, cap=_HEADLINE_CAP):
+    """Round-robin real feed rows. Drops duplicate links. Does not invent titles."""
+    seen = set()
+    merged = []
+    longest = max((len(b) for b in batches), default=0)
+    for i in range(longest):
+        for batch in batches:
+            if i >= len(batch):
+                continue
+            item = batch[i]
+            key = item.get("link") or ""
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            merged.append(item)
+            if len(merged) >= cap:
+                return merged
+    return merged
+
+
 async def _fetch_headlines(client):
-    last_err = "no feed"
-    for url, source_name in _HEADLINE_FEEDS:
+    async def one(url, source_name):
         try:
             r = await client.get(url, headers={"User-Agent": "DeskBox/1.0"})
             r.raise_for_status()
-            items = _parse_rss_headlines(r.content, source_name, limit=8)
-            if items:
-                return {"ok": True, "source": source_name, "items": items}
-            last_err = "empty feed"
-        except Exception as e:
-            last_err = str(e)[:160]
-    return {"ok": False, "items": [], "error": last_err}
+            return _parse_rss_headlines(r.content, source_name, limit=_HEADLINE_PER_FEED)
+        except Exception:
+            return []
+
+    batches = await asyncio.gather(*[one(url, name) for url, name in _HEADLINE_FEEDS])
+    merged = _merge_headline_rows(list(batches))
+    if merged:
+        return {"ok": True, "items": merged, "count": len(merged)}
+    return {"ok": False, "items": [], "error": "no feed"}
 
 
 async def build_home_payload(force=False):
@@ -1004,7 +1061,7 @@ async def build_home_payload(force=False):
     weather = {"ok": False}
     sunset = {"ok": False}
     headlines = {"ok": False, "items": []}
-    async with httpx.AsyncClient(timeout=8.0, follow_redirects=True) as client:
+    async with httpx.AsyncClient(timeout=12.0, follow_redirects=True) as client:
         forecast_res, aqi_res, headlines = await asyncio.gather(
             client.get(forecast_url),
             client.get(aqi_url),
@@ -1056,7 +1113,7 @@ async def build_home_payload(force=False):
         "place": "Taylors",
         "weather": weather,
         "sunset": sunset,
-        "headlines": (headlines.get("items") or [])[:8] if isinstance(headlines, dict) else [],
+        "headlines": (headlines.get("items") or [])[:_HEADLINE_CAP] if isinstance(headlines, dict) else [],
         "headlines_ok": bool(isinstance(headlines, dict) and headlines.get("ok")),
     }
     if weather.get("ok") or sunset.get("ok") or payload["headlines_ok"]:
@@ -1074,6 +1131,212 @@ async def home_feed(token: str = ""):
     if token != DESK_TOKEN:
         return JSONResponse({"error": "bad token"}, status_code=403)
     return JSONResponse(await build_home_payload())
+
+
+def icon_phase(on=None):
+    """Stable mark phase. Same image for a 4-day window. Original every 30 days.
+
+    A later 30-day cycle uses the other aurora palette after it lands on original.
+    """
+    if on is None:
+        on = datetime.now(ZoneInfo(TAYLORS_TZ)).date()
+    days = (on - _MARK_EPOCH).days
+    if days < 0:
+        days = 0
+    cycle = days // _MARK_CYCLE_DAYS
+    day_in = days % _MARK_CYCLE_DAYS
+    slot = day_in // _MARK_WINDOW_DAYS
+    palette = _MARK_PALETTES[cycle % len(_MARK_PALETTES)]
+    if slot == 0:
+        variant = "original"
+        twist = "plain"
+    else:
+        accents = palette[1:]
+        variant = accents[(slot - 1) % len(accents)]
+        twist = ("ring", "spark", "plain")[slot % 3]
+    color = _MARK_COLORS[variant]
+    until = 0 if day_in == 0 else _MARK_CYCLE_DAYS - day_in
+    return {
+        "variant": variant,
+        "label": "Original" if variant == "original" else variant.title(),
+        "color": color,
+        "twist": twist,
+        "cycle": cycle,
+        "day_in_cycle": day_in,
+        "window_days": _MARK_WINDOW_DAYS,
+        "cycle_days": _MARK_CYCLE_DAYS,
+        "days_until_original": until,
+        "palette": cycle % len(_MARK_PALETTES),
+    }
+
+
+def _hex_rgb(value):
+    h = value.lstrip("#")
+    return tuple(int(h[i:i + 2], 16) for i in (0, 2, 4))
+
+
+def mark_svg(phase=None):
+    phase = phase or icon_phase()
+    color = phase["color"]
+    twist = phase["twist"]
+    ring = ""
+    spark = ""
+    if twist == "ring":
+        ring = f'<circle cx="32" cy="32" r="26.5" fill="none" stroke="{color}" stroke-width="2.4"/>'
+    elif twist == "spark":
+        spark = f'<circle cx="50" cy="13" r="3.6" fill="{color}"/>'
+    return (
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Desk">'
+        '<rect width="64" height="64" rx="14" fill="#0d1117"/>'
+        f"{ring}"
+        f'<circle cx="32" cy="32" r="22" fill="{color}"/>'
+        '<path d="M32 18 46 32 32 46 18 32Z" fill="#0d1117"/>'
+        f"{spark}"
+        "</svg>"
+    )
+
+
+def _png_chunk(tag, data):
+    import struct
+    import zlib
+    return struct.pack(">I", len(data)) + tag + data + struct.pack(">I", zlib.crc32(tag + data) & 0xFFFFFFFF)
+
+
+def mark_png(size, phase=None):
+    import struct
+    import zlib
+    phase = phase or icon_phase()
+    size = int(size)
+    if size >= 256:
+        size = 512
+    elif 150 <= size <= 180:
+        size = 180
+    else:
+        size = 192
+    fill = _hex_rgb(phase["color"])
+    bg = _MARK_BG
+    twist = phase["twist"]
+    cx = (size - 1) / 2
+    cy = cx
+    radius = size * 0.34
+    diamond = size * 0.20
+    spark_r = size * 0.055
+    sx = cx + radius * 0.62
+    sy = cy - radius * 1.22
+    rows = []
+    for y in range(size):
+        row = bytearray()
+        for x in range(size):
+            dx = x - cx
+            dy = y - cy
+            dist = (dx * dx + dy * dy) ** 0.5
+            man = abs(dx) + abs(dy)
+            px = bg
+            if twist == "ring" and abs(dist - radius * 1.16) <= max(1.4, size * 0.015):
+                px = fill
+            if dist <= radius:
+                px = fill
+            if man <= diamond:
+                px = bg
+            if twist == "spark" and (x - sx) ** 2 + (y - sy) ** 2 <= spark_r ** 2:
+                px = fill
+            row += bytes((px[0], px[1], px[2], 255))
+        rows.append(bytes(row))
+    raw = b"".join(b"\x00" + row for row in rows)
+    ihdr = struct.pack(">IIBBBBB", size, size, 8, 6, 0, 0, 0)
+    return (
+        b"\x89PNG\r\n\x1a\n"
+        + _png_chunk(b"IHDR", ihdr)
+        + _png_chunk(b"IDAT", zlib.compress(raw, 9))
+        + _png_chunk(b"IEND", b"")
+    )
+
+
+_mark_png_cache = {}
+
+
+def youtube_status():
+    """True only when a public OAuth client id is configured. Never returns the value."""
+    configured = False
+    for name in _YOUTUBE_CLIENT_ENVS:
+        if (os.environ.get(name) or "").strip():
+            configured = True
+            break
+    if configured:
+        return {
+            "configured": True,
+            "playlists": [],
+            "blocker": None,
+        }
+    return {
+        "configured": False,
+        "playlists": [],
+        "blocker": "google_oauth_client_id",
+    }
+
+
+@app.get("/api/theme")
+async def theme_mark():
+    """Public icon phase. No token and no secrets — color and window only."""
+    return JSONResponse(icon_phase(), headers={"Cache-Control": "public, max-age=1800"})
+
+
+@app.get("/icon.svg")
+async def icon_svg():
+    phase = icon_phase()
+    return Response(
+        content=mark_svg(phase),
+        media_type="image/svg+xml",
+        headers={"Cache-Control": "public, max-age=1800"},
+    )
+
+
+@app.get("/icon-mark.png")
+async def icon_mark_png(size: int = 192):
+    phase = icon_phase()
+    if size >= 256:
+        size = 512
+    elif 150 <= size <= 180:
+        size = 180
+    else:
+        size = 192
+    key = (size, phase["variant"], phase["twist"], phase["cycle"])
+    png = _mark_png_cache.get(key)
+    if png is None:
+        png = mark_png(size, phase)
+        _mark_png_cache[key] = png
+    return Response(content=png, media_type="image/png", headers={"Cache-Control": "public, max-age=1800"})
+
+
+@app.get("/manifest.webmanifest")
+async def web_manifest():
+    phase = icon_phase()
+    theme_color = "#171022" if phase["variant"] == "original" else phase["color"]
+    body = {
+        "name": "Desk — live room",
+        "short_name": "Desk",
+        "description": "Shavor trading desk: Grok + Gemini + Ace bridge",
+        "start_url": "/",
+        "scope": "/",
+        "display": "standalone",
+        "background_color": "#0d1117",
+        "theme_color": theme_color,
+        "orientation": "portrait-primary",
+        "icons": [
+            {"src": "/icon-mark.png?size=192", "sizes": "192x192", "type": "image/png", "purpose": "any"},
+            {"src": "/icon-mark.png?size=512", "sizes": "512x512", "type": "image/png", "purpose": "any"},
+            {"src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any"},
+        ],
+    }
+    return JSONResponse(body, media_type="application/manifest+json", headers={"Cache-Control": "public, max-age=1800"})
+
+
+@app.get("/api/youtube")
+async def youtube_tab(token: str = ""):
+    """Playlist shell. Empty until a Google OAuth client id exists. No invented rows."""
+    if token != DESK_TOKEN:
+        return JSONResponse({"error": "bad token"}, status_code=403)
+    return JSONResponse(youtube_status())
 
 
 @app.get("/api/gainers")

@@ -1,7 +1,7 @@
 // Minimal service worker so Chrome treats Desk as installable.
-const CACHE = 'desk-shell-v1';
+const CACHE = 'desk-shell-v2';
 self.addEventListener('install', (e) => {
-  e.waitUntil(caches.open(CACHE).then((c) => c.addAll(['/static/manifest.webmanifest'])));
+  e.waitUntil(caches.open(CACHE).then((c) => c.addAll(['/manifest.webmanifest', '/icon.svg'])));
   self.skipWaiting();
 });
 self.addEventListener('activate', (e) => { e.waitUntil(self.clients.claim()); });

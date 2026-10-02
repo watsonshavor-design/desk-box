@@ -5,11 +5,11 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <meta name="color-scheme" content="light dark" />
   <meta name="theme-color" content="#171022" />
-  <link rel="icon" href="data:," />
   <title>Shavor's Desk</title>
-  <link rel="manifest" href="/static/manifest.webmanifest">
-  <link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
-  <link rel="icon" type="image/png" sizes="192x192" href="/static/icon-192.png">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="apple-touch-icon" href="/icon-mark.png?size=180">
+  <link rel="icon" href="/icon.svg" type="image/svg+xml">
+  <link rel="icon" type="image/png" sizes="192x192" href="/icon-mark.png?size=192">
   <style>
     @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500&display=swap');
 
@@ -133,10 +133,10 @@
     .rail-status small { color: var(--muted); font-size: 11px; }
     .live-dot { display: inline-block; width: 7px; height: 7px; margin-right: 5px; border-radius: 50%; background: #22a06b; box-shadow: 0 0 0 3px color-mix(in srgb, #22a06b 20%, transparent); }
 
-    .nav-list { display: grid; gap: 6px; }
+    .nav-list { display: grid; gap: 4px; overflow: auto; flex: 1; min-height: 0; padding-bottom: 8px; }
     .nav-btn {
       width: 100%; border: 0; background: transparent; border-radius: 12px;
-      padding: 11px 12px; display:flex; align-items:center; gap: 12px;
+      min-height: 48px; padding: 12px 14px; display:flex; align-items:center; gap: 12px;
       color: var(--muted); font-weight: 600; text-align:left; cursor:pointer;
     }
     .nav-btn svg { width: 19px; height: 19px; }
@@ -155,7 +155,8 @@
     .switch[aria-checked="true"]::after { transform:translateX(18px); }
 
     .main { grid-column: 2; min-width:0; padding: 34px clamp(22px, 4vw, 60px) 70px; }
-    .topbar { display:flex; justify-content:space-between; align-items:flex-start; gap:24px; margin-bottom:28px; }
+    .topbar { display:flex; justify-content:space-between; align-items:center; gap:24px; margin-bottom:28px; }
+    .top-brand { display:flex; align-items:center; gap:12px; min-width:0; }
     .eyebrow { margin:0 0 5px; color:var(--muted); font-size:13px; font-weight:600; }
     h1 { margin:0; font-size:clamp(28px, 3.4vw, 42px); line-height:1.08; letter-spacing:-.035em; }
     .top-actions { display:flex; gap:8px; align-items:center; }
@@ -183,7 +184,7 @@
     .voice-pill.warm i { background:var(--warm); }
     .voice-pill.blue i { background:var(--blue); }
     .card-actions { display:flex; gap:8px; flex-wrap:wrap; margin-top:25px; }
-    .primary-btn, .ghost-btn { border:0; border-radius:12px; padding:10px 14px; font-weight:700; font-size:13px; cursor:pointer; }
+    .primary-btn, .ghost-btn { border:0; border-radius:12px; min-height:44px; padding:12px 16px; font-weight:700; font-size:14px; cursor:pointer; }
     .primary-btn { background:var(--accent); color:#fff; }
     @media (prefers-color-scheme: dark){ .primary-btn{color:#160d21;} }
     .ghost-btn { background:var(--surface-3); color:var(--ink); }
@@ -287,7 +288,7 @@
     .owner.anchor { background:var(--blue-soft); color:var(--blue); }
 
     .brief-controls { display:flex; gap:7px; flex-wrap:wrap; margin-bottom:20px; }
-    .brief-tab { border:1px solid var(--line); background:var(--surface); border-radius:10px; padding:8px 12px; color:var(--muted); font-size:12px; font-weight:700; cursor:pointer; }
+    .brief-tab { border:1px solid var(--line); background:var(--surface); border-radius:10px; min-height:44px; padding:10px 14px; color:var(--muted); font-size:13px; font-weight:700; cursor:pointer; }
     .brief-tab.active { background:var(--ink); color:var(--surface); border-color:var(--ink); }
     .brief-page { display:none; }
     .brief-page.active { display:block; }
@@ -318,10 +319,10 @@
     .movers-head h2 { margin:0 0 5px; font-size:22px; letter-spacing:-.025em; }
     .movers-head p { margin:0; color:var(--muted); font-size:12px; }
     .source-tabs { display:flex; flex-wrap:wrap; gap:6px; justify-content:flex-end; }
-    .source-tab { border:1px solid var(--line); background:var(--surface-2); color:var(--muted); border-radius:10px; padding:7px 10px; font-size:11px; font-weight:700; cursor:pointer; }
+    .source-tab { border:1px solid var(--line); background:var(--surface-2); color:var(--muted); border-radius:10px; min-height:44px; padding:10px 14px; font-size:13px; font-weight:700; cursor:pointer; }
     .source-tab.active { background:var(--accent); color:#fff; border-color:var(--accent); }
     .list-tabs { display:flex; flex-wrap:wrap; gap:6px; margin:10px 0 4px; }
-    .list-tab { border:1px solid var(--line); background:transparent; color:var(--muted); border-radius:999px; padding:6px 12px; font-size:11px; font-weight:700; cursor:pointer; }
+    .list-tab { border:1px solid var(--line); background:transparent; color:var(--muted); border-radius:999px; min-height:40px; padding:8px 14px; font-size:13px; font-weight:700; cursor:pointer; }
     .list-tab.active { background:var(--surface-2); color:var(--text); border-color:var(--accent); }
     .movers-columns { display:grid; grid-template-columns:48px minmax(0,1fr) 94px 94px; gap:10px; padding:11px 22px; color:var(--muted); font:600 10px "IBM Plex Mono",monospace; border-bottom:1px solid var(--line); }
     .movers-columns span:nth-child(n+3) { text-align:right; }
@@ -396,7 +397,7 @@
     }
     .home-search input::placeholder { color: var(--muted); }
     .home-search-btn {
-      width: 40px; height: 40px; border: 0; border-radius: 50%;
+      width: 44px; height: 44px; border: 0; border-radius: 50%;
       background: transparent; color: var(--muted); display: grid; place-items: center; cursor: pointer;
     }
     .home-search-btn svg { width: 20px; height: 20px; }
@@ -407,7 +408,7 @@
     .home-chips { display: flex; flex-wrap: wrap; gap: 8px; margin: 14px 0 16px; }
     .home-chip {
       border: 0; background: var(--surface-2); color: var(--ink);
-      border-radius: 999px; padding: 8px 14px; font-size: 12px; font-weight: 700; cursor: pointer;
+      border-radius: 999px; min-height: 44px; padding: 12px 16px; font-size: 14px; font-weight: 700; cursor: pointer;
     }
     .home-chip:hover { background: var(--accent-soft); color: var(--accent-strong); }
     .home-cards {
@@ -436,9 +437,16 @@
     }
     @media (prefers-color-scheme: dark) { .home-head h2 { color: #160d21; } }
     .home-empty { color: var(--muted); font-size: 14px; padding: 18px 2px 8px; }
+    .home-brand { display:flex; align-items:center; gap:12px; margin:0 0 16px; }
+    .home-brand strong { display:block; font-size:16px; letter-spacing:-.02em; }
+    .home-brand span { display:block; margin-top:2px; color:var(--muted); font-size:12px; font-weight:650; }
+    .app-mark { width:44px; height:44px; border-radius:12px; background:#0d1117; flex:0 0 auto; }
+    .topbar .app-mark { width:40px; height:40px; }
+    .home-count { margin:0 0 4px; color:var(--muted); font-size:12px; font-weight:700; }
+    .home-headlines { display:block; }
     .home-item {
       display: grid; grid-template-columns: 132px minmax(0, 1fr); gap: 14px;
-      padding: 16px 0; border-top: 1px solid var(--line); text-decoration: none; color: inherit;
+      padding: 18px 2px; min-height: 72px; border-top: 1px solid var(--line); text-decoration: none; color: inherit;
     }
     .home-item.no-img { grid-template-columns: minmax(0, 1fr); }
     .home-thumb { width: 132px; height: 88px; object-fit: cover; border-radius: 12px; background: var(--surface-3); }
@@ -467,7 +475,7 @@
     @media (max-width: 700px) {
       .app { display:block; }
       .rail { display:none; }
-      .main { padding:24px 15px calc(150px + env(safe-area-inset-bottom)); }
+      .main { padding:24px 15px calc(188px + env(safe-area-inset-bottom)); }
       .topbar { margin-bottom:22px; align-items:center; }
       .top-actions .proto-badge { display:none; }
       h1 { font-size:29px; }
@@ -504,12 +512,12 @@
       .data-strip { grid-template-columns:1fr 1fr; }
       .datum:last-child { grid-column:1/-1; }
       .mobile-nav {
-        display:grid; grid-template-columns:repeat(6,1fr); position:fixed; z-index:30;
+        display:grid; grid-template-columns:repeat(4,1fr); position:fixed; z-index:30;
         left:10px; right:10px; bottom:calc(10px + env(safe-area-inset-bottom));
         background:color-mix(in srgb, var(--surface) 94%, transparent); border:1px solid var(--line);
         border-radius:19px; padding:7px; box-shadow:var(--shadow);
       }
-      .mobile-nav .nav-btn { width:auto; height:50px; padding:5px 2px; display:flex; flex-direction:column; gap:3px; justify-content:center; font-size:9px; border-radius:13px; }
+      .mobile-nav .nav-btn { width:auto; height:auto; min-height:52px; padding:8px 2px; display:flex; flex-direction:column; gap:3px; justify-content:center; font-size:11px; border-radius:13px; }
       .mobile-nav .nav-btn svg { width:18px; height:18px; }
       .mobile-nav .nav-btn > span:not(.count) { display:block; }
       .mobile-nav .nav-btn .count { display:none; }
@@ -547,6 +555,20 @@
     #input { width:100%; border:0; background:transparent; color:inherit; font:inherit; outline:none; }
     #send:disabled { opacity:.4; }
 
+    .maps-panel, .yt-panel { max-width: 720px; }
+    .maps-form { display:grid; gap:12px; margin-top:8px; }
+    .maps-form label { display:block; margin-bottom:6px; font-size:13px; font-weight:750; }
+    .maps-form input {
+      width:100%; min-height:52px; border-radius:16px; border:1px solid var(--line);
+      background:var(--surface); color:var(--ink); font-size:17px; padding:12px 16px;
+    }
+    .maps-go { width:100%; min-height:56px; font-size:17px; border-radius:16px; }
+    .maps-note { color:var(--muted); font-size:14px; line-height:1.5; margin:8px 0 0; }
+    .yt-panel h2 { margin:0 0 8px; letter-spacing:-.03em; }
+    .yt-connect { width:100%; max-width:420px; min-height:56px; font-size:17px; border-radius:16px; margin-top:16px; }
+    .yt-connect:disabled { opacity:.55; cursor:default; }
+    .yt-empty { margin-top:18px; padding:18px; border-radius:16px; background:var(--surface-2); color:var(--muted); font-size:14px; line-height:1.5; }
+
   </style>
 </head>
 <body>
@@ -568,6 +590,8 @@
         <button class="nav-btn" data-view="today"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 13h6V4H4v9Zm10 7h6V11h-6v9ZM4 20h6v-3H4v3Zm10-13h6V4h-6v3Z"/></svg><span>Today</span></button>
         <button class="nav-btn" data-view="market"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 18 9 13l3 3 7-9"/><path d="M14 7h5v5"/><path d="M4 4v16h16"/></svg><span>Gainers</span></button>
         <button class="nav-btn" data-view="chat"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4v8Z"/><path d="M8 9h8M8 13h5"/></svg><span>Chat</span></button>
+        <button class="nav-btn" data-view="maps"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 21s7-6.2 7-11a7 7 0 1 0-14 0c0 4.8 7 11 7 11Z"/><circle cx="12" cy="10" r="2.2"/></svg><span>Maps</span></button>
+        <button class="nav-btn" data-view="youtube"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="6" width="18" height="12" rx="3"/><path d="m10 9 5 3-5 3V9Z"/></svg><span>YouTube</span></button>
         <button class="nav-btn" data-view="tasks"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m9 11 2 2 4-5"/><path d="M19 12a7 7 0 1 1-4.1-6.37"/></svg><span>Tasks</span><span class="count">3</span></button>
         <button class="nav-btn" data-view="briefing"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 19.5V5a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v14.5"/><path d="M8 7h8M8 11h8M8 15h5M2 19h20"/></svg><span>Briefing</span><span class="count">3</span></button>
       </nav>
@@ -581,7 +605,10 @@
 
     <main class="main is-home">
       <header class="topbar">
+        <div class="top-brand">
+        <img class="app-mark" id="topMark" alt="" width="40" height="40" src="/icon.svg">
         <div><p class="eyebrow" id="viewEyebrow">Tuesday evening · Sep 29</p><h1 id="viewTitle">Good evening, Shavor</h1></div>
+        </div>
         <div class="top-actions">
           <span class="proto-badge"><span class="live-dot"></span>Live room</span>
         </div>
@@ -589,6 +616,10 @@
 
       <section class="view active" id="homeView" aria-label="Home">
         <div class="home-feed">
+          <div class="home-brand">
+            <img class="app-mark" id="homeMark" alt="" width="44" height="44" src="/icon.svg">
+            <div><strong>Desk</strong><span id="homeMarkLabel">Icon theme</span></div>
+          </div>
           <form class="home-search" id="homeSearchForm" role="search">
             <input id="homeSearch" type="search" placeholder="Search headlines" aria-label="Search headlines" autocomplete="off" enterkeyhint="search"/>
             <button type="button" class="home-search-btn" id="homeSpeak" aria-label="Read headlines aloud" aria-pressed="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M4 10v4h3l4 4V6L7 10H4Z"/><path d="M16 9a4 4 0 0 1 0 6"/><path d="M18.5 6.5a7.5 7.5 0 0 1 0 11"/></svg></button>
@@ -597,6 +628,8 @@
           <div class="home-chips" aria-label="Shortcuts">
             <button type="button" class="home-chip" data-go="chat">Chat</button>
             <button type="button" class="home-chip" data-go="market">Gainers</button>
+            <button type="button" class="home-chip" data-go="maps">Maps</button>
+            <button type="button" class="home-chip" data-go="youtube">YouTube</button>
             <button type="button" class="home-chip" data-go="briefing">Briefing</button>
           </div>
           <div class="home-cards" id="homeCards">
@@ -617,9 +650,16 @@
               <p class="home-big home-desk-label">KALA is watch-only</p>
               <p class="home-sub">Standing note. No prices on this card.</p>
             </article>
+            <article class="home-info" id="homeMapsCard">
+              <p class="home-kicker">Directions</p>
+              <p class="home-big home-desk-label">Maps</p>
+              <p class="home-sub">Type an address. No login.</p>
+              <button type="button" class="home-chip" data-go="maps">Open maps</button>
+            </article>
           </div>
           <div class="home-head"><h2>Top headlines</h2></div>
-          <div id="homeHeadlines"><p class="home-empty">Loading headlines…</p></div>
+          <p class="home-count" id="homeHeadlineCount"></p>
+          <div class="home-headlines" id="homeHeadlines"><p class="home-empty">Loading headlines…</p></div>
         </div>
       </section>
 
@@ -647,7 +687,7 @@
             <article class="card app-card">
               <div class="card-head"><h3>Connected apps</h3><button class="text-btn" id="manageAppsBtn">Manage</button></div>
               <div class="app-card-grid">
-                <button class="app-launcher" data-app-shortcut="YouTube" aria-label="View YouTube feed integration"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="6" width="18" height="12" rx="4"/><path d="m10 9 5 3-5 3V9Z" fill="currentColor" stroke="none"/></svg><span>YouTube</span></button>
+                <button class="app-launcher" data-go="youtube" type="button" aria-label="Open the YouTube tab"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="6" width="18" height="12" rx="4"/><path d="m10 9 5 3-5 3V9Z" fill="currentColor" stroke="none"/></svg><span>YouTube</span></button>
                 <button class="app-launcher" data-app-shortcut="Facebook" aria-label="View Facebook feed integration"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M13.7 21v-8h2.7l.4-3.1h-3.1v-2c0-.9.3-1.5 1.6-1.5H17V3.6c-.3 0-1.3-.1-2.5-.1-2.5 0-4.2 1.5-4.2 4.3v2.1H7.5V13h2.8v8h3.4Z"/></svg><span>Facebook</span></button>
                 <button class="app-launcher" data-app-shortcut="Snapchat" aria-label="View Snapchat feed integration"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M12 3.4c-2.5 0-4.1 2-4.1 4.6 0 .5.1 1.1.1 1.6-.4.2-1 .1-1.4-.1-.5-.2-.9.6-.3 1 .6.4 1.3.5 1.7.8-.2.8-.9 2.2-2.8 3-.6.3-.4 1.1.2 1.2.7.1 1.1.4 1.3 1 .2.4.6.6 1 .5.9-.2 1.5.3 2.1.7.6.4 1.2.8 2.2.8s1.6-.4 2.2-.8c.6-.4 1.2-.9 2.1-.7.4.1.8-.1 1-.5.2-.6.6-.9 1.3-1 .6-.1.8-.9.2-1.2-1.9-.8-2.6-2.2-2.8-3 .4-.3 1.1-.4 1.7-.8.6-.4.2-1.2-.3-1-.4.2-1 .3-1.4.1 0-.5.1-1.1.1-1.6 0-2.6-1.6-4.6-4.1-4.6Z"/></svg><span>Snapchat</span></button>
               </div>
@@ -789,6 +829,36 @@
           </div>
         </div>
       </section>
+
+      <section class="view" id="mapsView" aria-label="Maps">
+        <div class="card maps-panel" style="border-radius:24px;padding:22px;">
+          <p class="section-label">MAPS</p>
+          <h2 style="margin:0 0 6px;letter-spacing:-.03em;">Directions</h2>
+          <p class="maps-note">One address opens as the destination. Add a start only when you want a from / to route. This uses Google Maps. No account and no API key.</p>
+          <form class="maps-form" id="mapsForm">
+            <div>
+              <label for="mapsFrom">From <span style="font-weight:600;color:var(--muted)">(optional)</span></label>
+              <input id="mapsFrom" type="text" autocomplete="street-address" enterkeyhint="next" placeholder="Start address">
+            </div>
+            <div>
+              <label for="mapsTo">To</label>
+              <input id="mapsTo" type="text" autocomplete="street-address" enterkeyhint="go" placeholder="Address or destination" required>
+            </div>
+            <button class="primary-btn maps-go" id="mapsGo" type="submit">Directions</button>
+          </form>
+        </div>
+      </section>
+
+      <section class="view" id="youtubeView" aria-label="YouTube">
+        <div class="card yt-panel" style="border-radius:24px;padding:22px;">
+          <p class="section-label">YOUTUBE</p>
+          <h2>Your playlists</h2>
+          <p class="maps-note">Playlists show up here after Google sign-in. Nothing is listed until that connection exists.</p>
+          <button type="button" class="primary-btn yt-connect" id="youtubeConnect" disabled aria-disabled="true">Connect YouTube</button>
+          <div class="yt-empty" id="youtubeStatus">Checking whether Google sign-in is set up…</div>
+          <div id="youtubePlaylists"></div>
+        </div>
+      </section>
     </main>
   </div>
 
@@ -797,6 +867,8 @@
     <button class="nav-btn" data-view="today"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 13h6V4H4v9Zm10 7h6V11h-6v9ZM4 20h6v-3H4v3Zm10-13h6V4h-6v3Z"/></svg><span>Today</span></button>
     <button class="nav-btn" data-view="market"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 18 9 13l3 3 7-9"/><path d="M14 7h5v5"/><path d="M4 4v16h16"/></svg><span>Gainers</span></button>
     <button class="nav-btn" data-view="chat"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4v8Z"/></svg><span>Chat</span></button>
+    <button class="nav-btn" data-view="maps"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 21s7-6.2 7-11a7 7 0 1 0-14 0c0 4.8 7 11 7 11Z"/><circle cx="12" cy="10" r="2.2"/></svg><span>Maps</span></button>
+    <button class="nav-btn" data-view="youtube"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="6" width="18" height="12" rx="3"/><path d="m10 9 5 3-5 3V9Z"/></svg><span>YouTube</span></button>
     <button class="nav-btn" data-view="tasks"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m9 11 2 2 4-5"/><path d="M19 12a7 7 0 1 1-4.1-6.37"/></svg><span>Tasks</span></button>
     <button class="nav-btn" data-view="briefing"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 19.5V5a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v14.5"/><path d="M8 7h8M8 11h8M8 15h5M2 19h20"/></svg><span>Briefing</span></button>
   </nav>
@@ -817,6 +889,8 @@
         today: ["Desk", "Good evening, Shavor"],
         market: ["Broker-ranked movers", "Market scan"],
         chat: ["One room · three perspectives", "Desk conversation"],
+        maps: ["Address or from / to", "Directions"],
+        youtube: ["Playlists after Google sign-in", "YouTube"],
         tasks: ["Build, verify, hand off", "Tasks"],
         briefing: ["Tap into the lanes that matter", "Briefing"]
       };
@@ -1353,6 +1427,8 @@
           paintWeather(data);
           homeItems = (data && data.headlines) || [];
           if (!data || !data.headlines_ok) homeItems = [];
+          var countEl = document.getElementById('homeHeadlineCount');
+          if (countEl) countEl.textContent = homeItems.length ? (homeItems.length + ' stories · keep scrolling') : '';
           renderHeadlines();
           if (!data || !data.headlines_ok) {
             document.getElementById('homeHeadlines').innerHTML = '<p class="home-empty">Headlines unavailable.</p>';
@@ -1376,7 +1452,7 @@
         }
         var rows = visibleHeadlines();
         var script = rows.length
-          ? ('Top headlines. ' + rows.map(function(item){ return item.title; }).join('. '))
+          ? ('Top headlines. ' + rows.slice(0, 12).map(function(item){ return item.title; }).join('. ') + (rows.length > 12 ? '. More stories are in the list.' : ''))
           : 'No headlines to read.';
         try {
           window.speechSynthesis.cancel();
@@ -1397,6 +1473,83 @@
       else if (location.hash !== '#home') {
         try { history.replaceState(null, '', location.pathname + location.search + '#home'); } catch (e) {}
       }
+      function deskToken(){
+        try {
+          return new URLSearchParams(location.search).get('token') || localStorage.getItem('desk_token') || '';
+        } catch (e) { return ''; }
+      }
+      function applyMark(phase){
+        if (!phase) return;
+        var stamp = encodeURIComponent(String(phase.cycle) + '-' + String(phase.day_in_cycle));
+        var src = '/icon.svg?v=' + stamp;
+        document.querySelectorAll('.app-mark').forEach(function(img){ img.src = src; });
+        var label = document.getElementById('homeMarkLabel');
+        if (label) {
+          if (phase.variant === 'original') label.textContent = 'Original mark';
+          else label.textContent = phase.label + ' · original again in ' + phase.days_until_original + ' days';
+        }
+        var theme = document.querySelector('meta[name="theme-color"]');
+        if (theme && phase.variant !== 'original' && phase.color) theme.setAttribute('content', phase.color);
+        document.querySelectorAll('link[rel="icon"]').forEach(function(link){
+          if ((link.getAttribute('type') || '').indexOf('svg') !== -1) link.href = src;
+          else link.href = '/icon-mark.png?size=192&v=' + stamp;
+        });
+        var apple = document.querySelector('link[rel="apple-touch-icon"]');
+        if (apple) apple.href = '/icon-mark.png?size=180&v=' + stamp;
+      }
+      fetch('/api/theme').then(function(r){ return r.ok ? r.json() : null; }).then(applyMark).catch(function(){});
+      document.getElementById('mapsForm').addEventListener('submit', function(e){
+        e.preventDefault();
+        var to = (document.getElementById('mapsTo').value || '').trim();
+        var from = (document.getElementById('mapsFrom').value || '').trim();
+        if (!to && from) { to = from; from = ''; }
+        if (!to) { showToast('Enter an address'); return; }
+        var url = 'https://www.google.com/maps/dir/?api=1&destination=' + encodeURIComponent(to);
+        if (from) url += '&origin=' + encodeURIComponent(from);
+        window.open(url, '_blank', 'noopener');
+      });
+      document.getElementById('youtubeConnect').addEventListener('click', function(){
+        var btn = document.getElementById('youtubeConnect');
+        if (btn.disabled) return;
+        showToast('Google sign-in is not ready on this server');
+      });
+      function loadYouTube(){
+        var status = document.getElementById('youtubeStatus');
+        var btn = document.getElementById('youtubeConnect');
+        var list = document.getElementById('youtubePlaylists');
+        if (list) list.innerHTML = '';
+        var tok = deskToken();
+        if (!tok) {
+          status.textContent = 'Connect YouTube needs the desk open with your room token. No playlists are shown.';
+          btn.disabled = true;
+          return;
+        }
+        fetch('/api/youtube?token=' + encodeURIComponent(tok)).then(function(r){
+          if (!r.ok) throw new Error('youtube');
+          return r.json();
+        }).then(function(data){
+          var rows = (data && data.playlists) || [];
+          if (rows.length && list) {
+            list.innerHTML = rows.map(function(item){
+              if (!item || !item.title || !item.url) return '';
+              return '<a class="home-item no-img" href="' + homeEsc(item.url) + '" target="_blank" rel="noopener noreferrer"><div><h3>' + homeEsc(item.title) + '</h3></div></a>';
+            }).join('');
+            status.textContent = 'Playlists from your Google account.';
+            return;
+          }
+          btn.disabled = true;
+          btn.setAttribute('aria-disabled', 'true');
+          if (data && data.configured) {
+            status.textContent = 'A Google client id is set, but playlist sign-in is not finished on this server. No titles are shown.';
+          } else {
+            status.textContent = 'Connect YouTube is waiting on a Google OAuth client id. Your playlists will appear after that sign-in. None are listed now.';
+          }
+        }).catch(function(){
+          btn.disabled = true;
+          status.textContent = 'YouTube status could not be checked. No playlists are shown.';
+        });
+      }
+      loadYouTube();
       loadHome();
 
     })();
