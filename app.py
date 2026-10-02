@@ -664,6 +664,12 @@ async def on_startup():
     log.info("Desk Box up. Open /?token=%s", DESK_TOKEN)
 
 
+
+@app.get("/api/health")
+async def health():
+    """Liveness only — no token, no secrets."""
+    return JSONResponse({"ok": True, "service": "desk-box"})
+
 @app.get("/")
 async def index(token: str = ""):
     if token != DESK_TOKEN:
@@ -724,7 +730,7 @@ async def gainers(token: str = "", source: str = "combined", force: str = ""):
     return JSONResponse(payload)
 
 
-# --- Ace bridge -----------------------------------------------------------
+# --- Ace / CoS bridges ----------------------------------------------------
 # There is no API for Muse, so Ace joins the room through these endpoints:
 #   GET  /api/ace-inbox?token=...&since=<iso-ts> -> {"messages": [...]}
 #       Returns Shavor's @ace mentions newer than `since`, PLUS open
@@ -914,6 +920,43 @@ async def ace_reply(request: Request):
                   "peer, not as Shavor. Direct and plain.]\n\n" + text)
         if kind == "video":
             framed += "\n\n[Ace shared a video.]"
+        await msg_queue.put({"text": framed, "crosstalk": False,
+                             "image": image, "funnel": False,
+                             "for_ts": entry["ts"]})
+    return JSONResponse({"ok": True})
+
+
+# Chief of Staff (CoS) posts into the room the same way Ace does.
+# POST /api/cos-reply {"token": ..., "text": ..., "discuss"?: bool}
+#   from=cos, broadcast provider=cos. discuss=true queues one Rail/Anchor
+#   fan-out round framed as from CoS (never re-enters the queue).
+@app.post("/api/cos-reply")
+async def cos_reply(request: Request):
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "bad body"}, status_code=400)
+    if body.get("token") != DESK_TOKEN:
+        return JSONResponse({"error": "bad token"}, status_code=403)
+    text = str(body.get("text", "")).strip()[:4000]
+    if not text:
+        return JSONResponse({"error": "empty"}, status_code=400)
+    entry = {"from": "cos", "text": text, "ts": now_iso()}
+    attachment, image, kind = resolve_attachment(body.get("attachment"))
+    if attachment:
+        entry["attachment"] = attachment
+    await remember(entry)
+    bcast = {"type": "reply", "provider": "cos",
+             "round": 1, "text": text, "ts": entry["ts"]}
+    if attachment:
+        bcast["attachment"] = attachment
+    await room.broadcast(bcast)
+    if body.get("discuss") is True:
+        framed = ("[From Chief of Staff (CoS), your fellow desk partner — "
+                  "respond as a peer, not as Shavor. Direct and plain.]\n\n"
+                  + text)
+        if kind == "video":
+            framed += "\n\n[CoS shared a video.]"
         await msg_queue.put({"text": framed, "crosstalk": False,
                              "image": image, "funnel": False,
                              "for_ts": entry["ts"]})

@@ -424,13 +424,13 @@
     .task-marker.warn { background:var(--warm); }
     #log .msg { max-width:92%; padding:10px 12px; border-radius:16px; line-height:1.45; font-size:14px; }
     #log .msg.me { margin-left:auto; background:var(--accent-soft); }
-    #log .msg.grok, #log .msg.gemini, #log .msg.ace { background:var(--surface-2); border:1px solid var(--line); }
+    #log .msg.grok, #log .msg.gemini, #log .msg.ace, #log .msg.cos { background:var(--surface-2); border:1px solid var(--line); }
     #log .who { display:flex; align-items:center; flex-wrap:wrap; gap:6px 8px; font-size:11px; font-weight:700; letter-spacing:.06em; margin-bottom:4px; }
     #log .who img.av { width:18px; height:18px; border-radius:50%; flex:0 0 auto; }
     #log .who-name { font-weight:700; letter-spacing:.06em; }
     #log .who.grok { color:var(--warm); }
     #log .who.gemini { color:var(--blue); }
-    #log .who.me, #log .who.ace { color:var(--accent-strong); }
+    #log .who.me, #log .who.ace, #log .who.cos { color:var(--accent-strong); }
     #log .round { display:inline-block; font-size:10px; color:var(--muted); font-weight:400; letter-spacing:0; padding:2px 7px; border-radius:999px; background:var(--surface-3); }
     #log .ts { font-size:10px; color:var(--muted); font-weight:400; letter-spacing:0; }
     #status.on { color:var(--accent-strong); }
@@ -563,7 +563,7 @@
         <div class="chat-layout">
           <article class="card chat-panel">
             <div class="chat-toolbar">
-              <div class="personas" aria-label="Message filters"><button class="filter-chip active" data-filter="all">All</button><button class="filter-chip" data-filter="ace">Ace</button><button class="filter-chip" data-filter="rail">Rail</button><button class="filter-chip" data-filter="anchor">Anchor</button></div>
+              <div class="personas" aria-label="Message filters"><button class="filter-chip active" data-filter="all">All</button><button class="filter-chip" data-filter="ace">Ace</button><button class="filter-chip" data-filter="cos">CoS</button><button class="filter-chip" data-filter="rail">Rail</button><button class="filter-chip" data-filter="anchor">Anchor</button></div>
               <div class="mode-inline-group">
                 <label class="mode-inline">One answer <button class="switch mode-switch" role="switch" aria-checked="true" aria-label="Toggle one-answer mode"></button></label>
                 <label class="mode-inline">Conversational <button type="button" class="switch" id="conversationalSwitch" role="switch" aria-checked="false" aria-label="Toggle conversational mode"></button></label>
@@ -946,11 +946,13 @@
           if (!who) {
             if (m.classList.contains('me')) who = 'me';
             else if (m.classList.contains('ace')) who = 'ace';
+            else if (m.classList.contains('cos')) who = 'cos';
             else if (m.classList.contains('grok')) who = 'rail';
             else if (m.classList.contains('gemini')) who = 'anchor';
           }
           var show = true;
           if (filter === 'ace') show = (who === 'ace' || who === 'me');
+          else if (filter === 'cos') show = (who === 'cos' || who === 'me');
           else if (filter === 'rail') show = (who === 'rail' || who === 'grok' || who === 'me');
           else if (filter === 'anchor') show = (who === 'anchor' || who === 'gemini' || who === 'me');
           m.style.display = show ? '' : 'none';
@@ -963,6 +965,7 @@
         if (chip.dataset.filter === 'rail') showToast('Showing Rail messages');
         else if (chip.dataset.filter === 'anchor') showToast('Showing Anchor messages');
         else if (chip.dataset.filter === 'ace') showToast('Showing Ace messages');
+        else if (chip.dataset.filter === 'cos') showToast('Showing Chief of Staff messages');
       }); });
 
       function selectBrief(name){
@@ -1118,6 +1121,7 @@ const NAMES = {
   grok:   ["RAIL",   "/static/avatar-rail.png"],
   gemini: ["ANCHOR", "/static/avatar-anchor.png"],
   ace:    ["ACE",    "/static/icon-192.png"],
+  cos:    ["CHIEF OF STAFF", "/static/icon-192.png"],
   me:     ["SHAVOR", null]
 };
 
@@ -1160,6 +1164,7 @@ const VOICE_STYLE = {
   grok:   {pitch:0.75, rate:1.0},   // Rail — low and steady
   gemini: {pitch:1.05, rate:1.0},   // Anchor — even
   ace:    {pitch:1.2,  rate:1.03},  // Ace — a touch brighter
+  cos:    {pitch:0.9,  rate:1.0},   // CoS — calm desk lead
 };
 let voicePool = [];
 function initVoices(){
@@ -1182,7 +1187,7 @@ function speak(who, text){
     const u = new SpeechSynthesisUtterance(text);
     const style = VOICE_STYLE[who] || {pitch:1, rate:1};
     // Spread distinct English voices across the three personas when available.
-    const idx = {grok:0, gemini:1, ace:2}[who];
+    const idx = {grok:0, gemini:1, ace:2, cos:3}[who];
     if (voicePool.length && idx !== undefined)
       u.voice = voicePool[idx % voicePool.length];
     u.pitch = style.pitch; u.rate = style.rate;
@@ -1349,7 +1354,7 @@ function setThinking(provider, state){
   let el = document.getElementById(id);
   if(state==="thinking" || state==="reacting"){
     if(!el){ el = document.createElement("div"); el.id=id; el.className="thinking"; log.appendChild(el); }
-    el.textContent = (provider==="grok"?"Rail":provider==="gemini"?"Anchor":"Ace") +
+    el.textContent = (provider==="grok"?"Rail":provider==="gemini"?"Anchor":provider==="cos"?"Chief of Staff":"Ace") +
       (state==="reacting" ? " is reacting…" : " is thinking…");
     log.scrollTop = log.scrollHeight;
   } else if(el){ el.remove(); }
@@ -1512,6 +1517,7 @@ addMsg = function(who, text, round, ts, att){
     var whoKey = div.dataset.speaker || who;
     var show = true;
     if (filter === 'ace') show = (whoKey === 'ace' || whoKey === 'me');
+    else if (filter === 'cos') show = (whoKey === 'cos' || whoKey === 'me');
     else if (filter === 'rail') show = (whoKey === 'rail' || whoKey === 'grok' || whoKey === 'me');
     else if (filter === 'anchor') show = (whoKey === 'anchor' || whoKey === 'gemini' || whoKey === 'me');
     div.style.display = show ? '' : 'none';
