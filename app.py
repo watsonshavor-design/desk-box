@@ -134,8 +134,8 @@ DESK_CONTEXT = {
     "glnd_lock": ("GLND stock sold — qty 0. The old waiting-sell / $7 lock is retired. "
                   "Do not brief 'Sell GLND at $7' or treat GLND stock as an open position. "
                   "Confirm live book before mentioning any GLND residue (options/calls)."),
-    "risk": ("Max 3 names, max $1,500/name, risk <=0.5%/trade (~$77). "
-             "Kill switches: -$150/day, -$450/week, -$900/month."),
+    "risk": ("Standing rules: max 3 names, max $1,500/name, kill switches -$150 day / -$450 week / -$900 month. "
+             "Nothing is banned — any ticker is eligible."),
     "notes": ("General-purpose room: trading, research, learning, daily life, "
               "any questions — everyone answers, no hierarchy. "
               "Penny stocks allowed. Nothing-under-$5 retired. "
