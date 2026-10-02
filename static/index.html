@@ -68,12 +68,53 @@
       min-height: 100vh;
       overflow-x: hidden;
     }
+
+    .aurora-background {
+      position: fixed;
+      inset: 0;
+      z-index: 0;
+      overflow: hidden;
+      pointer-events: none;
+      background:
+        radial-gradient(ellipse 72% 58% at 12% 16%, rgba(16, 185, 129, .30), transparent 68%),
+        radial-gradient(ellipse 68% 62% at 86% 18%, rgba(45, 212, 191, .24), transparent 70%),
+        radial-gradient(ellipse 74% 68% at 74% 88%, rgba(139, 92, 246, .30), transparent 70%),
+        radial-gradient(ellipse 48% 52% at 20% 88%, rgba(217, 70, 239, .14), transparent 72%),
+        #07131d;
+      animation: auroraShift 18s ease-in-out infinite alternate;
+    }
+    .aurora-background::before {
+      content: "";
+      position: absolute;
+      inset: -22%;
+      background:
+        radial-gradient(ellipse 38% 26% at 30% 32%, rgba(74, 222, 128, .30), transparent 72%),
+        radial-gradient(ellipse 34% 30% at 68% 42%, rgba(34, 211, 238, .24), transparent 74%),
+        radial-gradient(ellipse 35% 30% at 54% 78%, rgba(167, 139, 250, .24), transparent 74%);
+      filter: blur(34px);
+      opacity: .82;
+      animation: auroraDrift 15s ease-in-out infinite alternate;
+    }
+    .aurora-background::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background: rgba(3, 8, 18, .28);
+    }
+    @keyframes auroraShift {
+      0% { background-position: 0% 0%, 100% 0%, 100% 100%, 0% 100%, 50% 50%; }
+      100% { background-position: 18% 12%, 78% 24%, 82% 76%, 16% 82%, 50% 50%; }
+    }
+    @keyframes auroraDrift {
+      0% { transform: translate3d(-3%, 2%, 0) scale(1); }
+      100% { transform: translate3d(4%, -3%, 0) scale(1.08); }
+    }
     button, input { font: inherit; }
     button { color: inherit; }
     button:focus-visible, input:focus-visible { outline: 3px solid color-mix(in srgb, var(--accent) 45%, transparent); outline-offset: 2px; }
     svg { display: block; }
 
-    .app { min-height: 100vh; display: grid; grid-template-columns: var(--sidebar) minmax(0, 1fr); }
+    .app { position: relative; z-index: 1; min-height: 100vh; display: grid; grid-template-columns: var(--sidebar) minmax(0, 1fr); }
     .rail {
       position: fixed;
       inset: 0 auto 0 0;
@@ -509,6 +550,7 @@
   </style>
 </head>
 <body>
+  <div class="aurora-background" aria-hidden="true"></div>
   <div class="app">
     <aside class="rail" aria-label="Primary navigation">
       <div class="rail-status">
