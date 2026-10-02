@@ -22,6 +22,9 @@ import json
 import logging
 import os
 import re
+import time
+import xml.etree.ElementTree as ET
+from zoneinfo import ZoneInfo
 
 import httpx
 import secrets
@@ -848,6 +851,229 @@ async def weather(token: str = "", lat: float = 0.0, lng: float = 0.0):
         return JSONResponse({"ok": False, "error": "lat/lng required"}, status_code=400)
     reading = await fetch_open_meteo(location["lat"], location["lng"])
     return JSONResponse({"location": location, "weather": reading})
+
+
+# Taylors, SC — Home feed cards. Town coordinates, not a device ping.
+TAYLORS_LAT = 34.9204
+TAYLORS_LNG = -82.2962
+TAYLORS_TZ = "America/New_York"
+_HOME_TTL_SEC = 300
+_home_cache = {"at": 0.0, "payload": None}
+_MRSS = "{http://search.yahoo.com/mrss/}"
+_WMO = {
+    0: "Clear", 1: "Mostly clear", 2: "Partly cloudy", 3: "Overcast",
+    45: "Fog", 48: "Freezing fog",
+    51: "Light drizzle", 53: "Drizzle", 55: "Heavy drizzle",
+    56: "Freezing drizzle", 57: "Freezing drizzle",
+    61: "Light rain", 63: "Rain", 65: "Heavy rain",
+    66: "Freezing rain", 67: "Freezing rain",
+    71: "Light snow", 73: "Snow", 75: "Heavy snow", 77: "Snow grains",
+    80: "Light showers", 81: "Showers", 82: "Heavy showers",
+    85: "Snow showers", 86: "Heavy snow showers",
+    95: "Thunderstorm", 96: "Thunderstorm", 99: "Thunderstorm",
+}
+_HEADLINE_FEEDS = (
+    ("https://feeds.bbci.co.uk/news/rss.xml", "BBC News"),
+    ("https://feeds.npr.org/1001/rss.xml", "NPR"),
+)
+
+
+def _fmt_sunset_local(raw):
+    """Open-Meteo sunset is local wall time, e.g. 2026-10-02T19:11."""
+    if not isinstance(raw, str) or "T" not in raw:
+        return None
+    try:
+        hh, mm = raw.split("T", 1)[1][:5].split(":")
+        h = int(hh)
+        m = int(mm)
+    except (ValueError, IndexError):
+        return None
+    ampm = "AM" if h < 12 else "PM"
+    h12 = h % 12 or 12
+    return f"{h12}:{m:02d} {ampm}"
+
+
+def _precip_now(hourly):
+    times = (hourly or {}).get("time") or []
+    probs = (hourly or {}).get("precipitation_probability") or []
+    if not times or not probs:
+        return None
+    now = datetime.now(ZoneInfo(TAYLORS_TZ)).strftime("%Y-%m-%dT%H:00")
+    idx = 0
+    if now in times:
+        idx = times.index(now)
+    else:
+        for i, t in enumerate(times):
+            if t <= now:
+                idx = i
+            else:
+                break
+    try:
+        val = probs[idx]
+        if val is None:
+            return None
+        return int(round(float(val)))
+    except (IndexError, TypeError, ValueError):
+        return None
+
+
+def _strip_html(raw):
+    text = re.sub(r"<[^>]+>", " ", raw or "")
+    text = re.sub(r"\s+", " ", text)
+    for a, b in (
+        ("&amp;", "&"), ("&quot;", '"'), ("&#39;", "'"), ("&apos;", "'"),
+        ("&lt;", "<"), ("&gt;", ">"), ("&nbsp;", " "),
+    ):
+        text = text.replace(a, b)
+    return text.strip()
+
+
+def _parse_rss_headlines(xml_bytes, source_name, limit=8):
+    root = ET.fromstring(xml_bytes)
+    out = []
+    for item in root.iter("item"):
+        title = _strip_html(item.findtext("title") or "")
+        link = (item.findtext("link") or "").strip()
+        if not title or not link.startswith("https://"):
+            continue
+        summary = _strip_html(item.findtext("description") or "")
+        if summary.lower() == title.lower():
+            summary = ""
+        image = None
+        thumb = item.find(f"{_MRSS}thumbnail")
+        if thumb is not None:
+            url = (thumb.attrib.get("url") or "").strip()
+            if url.startswith("https://"):
+                image = url
+        if not image:
+            enc = item.find("enclosure")
+            if enc is not None:
+                url = (enc.attrib.get("url") or "").strip()
+                typ = (enc.attrib.get("type") or "")
+                if url.startswith("https://") and typ.startswith("image/"):
+                    image = url
+        row = {"title": title[:240], "source": source_name, "link": link[:500]}
+        if summary:
+            row["summary"] = summary[:280]
+        if image:
+            row["image"] = image[:500]
+        out.append(row)
+        if len(out) >= limit:
+            break
+    return out
+
+
+async def _fetch_headlines(client):
+    last_err = "no feed"
+    for url, source_name in _HEADLINE_FEEDS:
+        try:
+            r = await client.get(url, headers={"User-Agent": "DeskBox/1.0"})
+            r.raise_for_status()
+            items = _parse_rss_headlines(r.content, source_name, limit=8)
+            if items:
+                return {"ok": True, "source": source_name, "items": items}
+            last_err = "empty feed"
+        except Exception as e:
+            last_err = str(e)[:160]
+    return {"ok": False, "items": [], "error": last_err}
+
+
+async def build_home_payload(force=False):
+    now_m = time.monotonic()
+    cached = _home_cache.get("payload")
+    if cached and not force and (now_m - float(_home_cache.get("at") or 0)) < _HOME_TTL_SEC:
+        return cached
+
+    lat, lng = TAYLORS_LAT, TAYLORS_LNG
+    forecast_url = (
+        "https://api.open-meteo.com/v1/forecast"
+        f"?latitude={lat}&longitude={lng}"
+        "&current=temperature_2m,weather_code"
+        "&hourly=precipitation_probability"
+        "&daily=sunset"
+        "&temperature_unit=fahrenheit"
+        "&timezone=America%2FNew_York"
+        "&forecast_days=2"
+    )
+    aqi_url = (
+        "https://air-quality-api.open-meteo.com/v1/air-quality"
+        f"?latitude={lat}&longitude={lng}"
+        "&current=us_aqi"
+        "&timezone=America%2FNew_York"
+    )
+    weather = {"ok": False}
+    sunset = {"ok": False}
+    headlines = {"ok": False, "items": []}
+    async with httpx.AsyncClient(timeout=8.0, follow_redirects=True) as client:
+        forecast_res, aqi_res, headlines = await asyncio.gather(
+            client.get(forecast_url),
+            client.get(aqi_url),
+            _fetch_headlines(client),
+            return_exceptions=True,
+        )
+    if isinstance(headlines, Exception):
+        headlines = {"ok": False, "items": []}
+    if not isinstance(forecast_res, Exception):
+        try:
+            forecast_res.raise_for_status()
+            data = forecast_res.json()
+        except Exception:
+            data = None
+        if isinstance(data, dict):
+            cur = data.get("current") or {}
+            temp = cur.get("temperature_2m")
+            if temp is not None:
+                try:
+                    code_i = int(cur.get("weather_code"))
+                except (TypeError, ValueError):
+                    code_i = None
+                aqi = None
+                if not isinstance(aqi_res, Exception):
+                    try:
+                        aqi_res.raise_for_status()
+                        raw_aqi = (aqi_res.json().get("current") or {}).get("us_aqi")
+                        if raw_aqi is not None:
+                            aqi = int(round(float(raw_aqi)))
+                    except Exception:
+                        aqi = None
+                weather = {
+                    "ok": True,
+                    "place": "Taylors",
+                    "temperature_f": temp,
+                    "condition": _WMO.get(code_i, "Unknown") if code_i is not None else "Unknown",
+                    "precip_chance_pct": _precip_now(data.get("hourly") or {}),
+                    "aqi": aqi,
+                    "observed_at": cur.get("time"),
+                }
+            suns = ((data.get("daily") or {}).get("sunset") or [None])[0]
+            # Prefer today's sunset. If the first entry is already past, still show it
+            # (the card is "sunset today"). Open-Meteo daily[0] is the local date.
+            label = _fmt_sunset_local(suns) if isinstance(suns, str) else None
+            if label:
+                sunset = {"ok": True, "label": label, "at": suns, "tz": TAYLORS_TZ}
+
+    payload = {
+        "place": "Taylors",
+        "weather": weather,
+        "sunset": sunset,
+        "headlines": (headlines.get("items") or [])[:8] if isinstance(headlines, dict) else [],
+        "headlines_ok": bool(isinstance(headlines, dict) and headlines.get("ok")),
+    }
+    if weather.get("ok") or sunset.get("ok") or payload["headlines_ok"]:
+        _home_cache["at"] = time.monotonic()
+        _home_cache["payload"] = payload
+    return payload
+
+
+@app.get("/api/home")
+async def home_feed(token: str = ""):
+    """Desk Home: Taylors weather, sunset, and public headlines.
+
+    Auth is the room token as a query param. Does not invent readings.
+    """
+    if token != DESK_TOKEN:
+        return JSONResponse({"error": "bad token"}, status_code=403)
+    return JSONResponse(await build_home_payload())
 
 
 @app.get("/api/gainers")

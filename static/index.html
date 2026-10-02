@@ -341,6 +341,72 @@
 
     .toast { position:fixed; left:50%; bottom:26px; transform:translate(-50%,16px); background:var(--ink); color:var(--surface); padding:10px 14px; border-radius:10px; font-size:12px; font-weight:600; opacity:0; pointer-events:none; transition:.2s; z-index:60; }
     .toast.show { opacity:1; transform:translate(-50%,0); }
+
+    .home-feed { max-width: 860px; margin: 0 auto; }
+    .home-search {
+      display: flex; align-items: center; gap: 6px;
+      background: var(--surface); border: 1px solid var(--line);
+      border-radius: 999px; padding: 6px 8px 6px 18px;
+      box-shadow: 0 8px 28px rgba(49, 29, 76, .06);
+    }
+    .home-search input {
+      flex: 1; min-width: 0; border: 0; background: transparent;
+      color: var(--ink); font-size: 16px; padding: 10px 0; outline: none;
+    }
+    .home-search input::placeholder { color: var(--muted); }
+    .home-search-btn {
+      width: 40px; height: 40px; border: 0; border-radius: 50%;
+      background: transparent; color: var(--muted); display: grid; place-items: center; cursor: pointer;
+    }
+    .home-search-btn svg { width: 20px; height: 20px; }
+    .home-search-btn:hover { background: var(--surface-2); color: var(--ink); }
+    .home-search-btn[aria-pressed="true"] { color: var(--accent-strong); background: var(--accent-soft); }
+    .home-search-btn:disabled { opacity: .38; cursor: default; }
+    .home-search-btn:disabled:hover { background: transparent; color: var(--muted); }
+    .home-chips { display: flex; flex-wrap: wrap; gap: 8px; margin: 14px 0 16px; }
+    .home-chip {
+      border: 0; background: var(--surface-2); color: var(--ink);
+      border-radius: 999px; padding: 8px 14px; font-size: 12px; font-weight: 700; cursor: pointer;
+    }
+    .home-chip:hover { background: var(--accent-soft); color: var(--accent-strong); }
+    .home-cards {
+      display: grid; grid-auto-flow: column; grid-auto-columns: minmax(168px, 1fr);
+      gap: 10px; overflow-x: auto; padding-bottom: 4px; scroll-snap-type: x proximity;
+    }
+    .home-info {
+      scroll-snap-align: start; background: var(--surface); border: 1px solid var(--line);
+      border-radius: 22px; padding: 14px 16px 13px; min-height: 118px;
+      display: flex; flex-direction: column; gap: 2px;
+    }
+    .home-kicker { margin: 0; font-size: 14px; font-weight: 700; letter-spacing: -.01em; }
+    .home-big { margin: 6px 0 0; font-size: 32px; font-weight: 700; letter-spacing: -.04em; line-height: 1; }
+    .home-desk-label { font-size: 18px; letter-spacing: -.02em; line-height: 1.25; margin-top: 10px; }
+    .home-sub { margin: 6px 0 0; color: var(--muted); font-size: 12px; font-weight: 600; }
+    .home-meta { margin-top: auto; display: flex; gap: 10px; align-items: center; color: var(--muted); font-size: 12px; font-weight: 650; padding-top: 8px; }
+    .home-meta .aqi-dot { width: 8px; height: 8px; border-radius: 50%; background: #3c9a62; display: inline-block; }
+    .home-meta .aqi-dot.warn { background: var(--warm); }
+    .home-meta .aqi-dot.bad { background: var(--danger); }
+    .home-sun { margin-left: auto; width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; background: var(--warm-soft); color: var(--warm); }
+    .home-sun svg { width: 16px; height: 16px; }
+    .home-head { display: flex; align-items: center; gap: 10px; margin: 22px 0 6px; }
+    .home-head h2 {
+      margin: 0; font-size: 12px; letter-spacing: .08em; font-weight: 800;
+      background: var(--accent); color: #fff; border-radius: 6px; padding: 6px 10px;
+    }
+    @media (prefers-color-scheme: dark) { .home-head h2 { color: #160d21; } }
+    .home-empty { color: var(--muted); font-size: 14px; padding: 18px 2px 8px; }
+    .home-item {
+      display: grid; grid-template-columns: 132px minmax(0, 1fr); gap: 14px;
+      padding: 16px 0; border-top: 1px solid var(--line); text-decoration: none; color: inherit;
+    }
+    .home-item.no-img { grid-template-columns: minmax(0, 1fr); }
+    .home-thumb { width: 132px; height: 88px; object-fit: cover; border-radius: 12px; background: var(--surface-3); }
+    .home-item h3 { margin: 0 0 6px; font-size: 18px; letter-spacing: -.02em; line-height: 1.25; }
+    .home-item p { margin: 0; color: var(--muted); font-size: 14px; line-height: 1.45; }
+    .home-src { margin-top: 8px; color: var(--muted); font-size: 12px; font-weight: 700; }
+    .main.is-home .topbar { display: none; }
+    .main.is-home { padding-top: 28px; }
+
     .mobile-nav { display:none; }
 
     @media (max-width: 980px) {
@@ -397,7 +463,7 @@
       .data-strip { grid-template-columns:1fr 1fr; }
       .datum:last-child { grid-column:1/-1; }
       .mobile-nav {
-        display:grid; grid-template-columns:repeat(5,1fr); position:fixed; z-index:30;
+        display:grid; grid-template-columns:repeat(6,1fr); position:fixed; z-index:30;
         left:10px; right:10px; bottom:calc(10px + env(safe-area-inset-bottom));
         background:color-mix(in srgb, var(--surface) 94%, transparent); border:1px solid var(--line);
         border-radius:19px; padding:7px; box-shadow:var(--shadow);
@@ -456,7 +522,8 @@
         <div><strong>Desk connected</strong><small><i class="live-dot"></i><span id="status">connecting…</span></small></div>
       </div>
       <nav class="nav-list">
-        <button class="nav-btn active" data-view="today"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 13h6V4H4v9Zm10 7h6V11h-6v9ZM4 20h6v-3H4v3Zm10-13h6V4h-6v3Z"/></svg><span>Today</span></button>
+        <button class="nav-btn active" data-view="home"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 10.5 12 4l8 6.5V20a1 1 0 0 1-1 1h-5v-6H10v6H5a1 1 0 0 1-1-1v-9.5Z"/></svg><span>Home</span></button>
+        <button class="nav-btn" data-view="today"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 13h6V4H4v9Zm10 7h6V11h-6v9ZM4 20h6v-3H4v3Zm10-13h6V4h-6v3Z"/></svg><span>Today</span></button>
         <button class="nav-btn" data-view="market"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 18 9 13l3 3 7-9"/><path d="M14 7h5v5"/><path d="M4 4v16h16"/></svg><span>Gainers</span></button>
         <button class="nav-btn" data-view="chat"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4v8Z"/><path d="M8 9h8M8 13h5"/></svg><span>Chat</span></button>
         <button class="nav-btn" data-view="tasks"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m9 11 2 2 4-5"/><path d="M19 12a7 7 0 1 1-4.1-6.37"/></svg><span>Tasks</span><span class="count">3</span></button>
@@ -470,7 +537,7 @@
       </div>
     </aside>
 
-    <main class="main">
+    <main class="main is-home">
       <header class="topbar">
         <div><p class="eyebrow" id="viewEyebrow">Tuesday evening · Sep 29</p><h1 id="viewTitle">Good evening, Shavor</h1></div>
         <div class="top-actions">
@@ -478,7 +545,43 @@
         </div>
       </header>
 
-      <section class="view active" id="todayView" aria-label="Today">
+      <section class="view active" id="homeView" aria-label="Home">
+        <div class="home-feed">
+          <form class="home-search" id="homeSearchForm" role="search">
+            <input id="homeSearch" type="search" placeholder="Search headlines" aria-label="Search headlines" autocomplete="off" enterkeyhint="search"/>
+            <button type="button" class="home-search-btn" id="homeSpeak" aria-label="Read headlines aloud" aria-pressed="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M4 10v4h3l4 4V6L7 10H4Z"/><path d="M16 9a4 4 0 0 1 0 6"/><path d="M18.5 6.5a7.5 7.5 0 0 1 0 11"/></svg></button>
+            <button type="button" class="home-search-btn" id="homeCam" disabled aria-label="Camera is not connected"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M4 8h3l2-2h6l2 2h3v11H4V8Z"/><circle cx="12" cy="13" r="3.2"/></svg></button>
+          </form>
+          <div class="home-chips" aria-label="Shortcuts">
+            <button type="button" class="home-chip" data-go="chat">Chat</button>
+            <button type="button" class="home-chip" data-go="market">Gainers</button>
+            <button type="button" class="home-chip" data-go="briefing">Briefing</button>
+          </div>
+          <div class="home-cards" id="homeCards">
+            <article class="home-info" id="homeWeather">
+              <p class="home-kicker">Taylors</p>
+              <p class="home-big" id="homeTemp">…</p>
+              <p class="home-sub" id="homeCond">Checking weather</p>
+              <div class="home-meta" id="homeWeatherMeta"><span id="homePrecip"></span><span id="homeAqi"></span></div>
+            </article>
+            <article class="home-info" id="homeSunset">
+              <p class="home-kicker">Sunset today</p>
+              <p class="home-big" id="homeSunsetTime">…</p>
+              <p class="home-sub" id="homeSunsetSub">Taylors</p>
+              <div class="home-meta"><span class="home-sun" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="4"/><path d="M12 3v2M12 19v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M3 12h2M19 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg></span></div>
+            </article>
+            <article class="home-info" id="homeDeskCard">
+              <p class="home-kicker">Desk</p>
+              <p class="home-big home-desk-label">KALA is watch-only</p>
+              <p class="home-sub">Standing note. No prices on this card.</p>
+            </article>
+          </div>
+          <div class="home-head"><h2>Top headlines</h2></div>
+          <div id="homeHeadlines"><p class="home-empty">Loading headlines…</p></div>
+        </div>
+      </section>
+
+      <section class="view" id="todayView" aria-label="Today">
         <div class="today-grid">
           <article class="card lead-card">
             <p class="section-label" id="answerLabel">DESK ANSWER · WAITING</p>
@@ -648,7 +751,8 @@
   </div>
 
   <nav class="mobile-nav" aria-label="Mobile navigation">
-    <button class="nav-btn active" data-view="today"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 13h6V4H4v9Zm10 7h6V11h-6v9ZM4 20h6v-3H4v3Zm10-13h6V4h-6v3Z"/></svg><span>Today</span></button>
+    <button class="nav-btn active" data-view="home"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 10.5 12 4l8 6.5V20a1 1 0 0 1-1 1h-5v-6H10v6H5a1 1 0 0 1-1-1v-9.5Z"/></svg><span>Home</span></button>
+    <button class="nav-btn" data-view="today"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 13h6V4H4v9Zm10 7h6V11h-6v9ZM4 20h6v-3H4v3Zm10-13h6V4h-6v3Z"/></svg><span>Today</span></button>
     <button class="nav-btn" data-view="market"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 18 9 13l3 3 7-9"/><path d="M14 7h5v5"/><path d="M4 4v16h16"/></svg><span>Gainers</span></button>
     <button class="nav-btn" data-view="chat"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4v8Z"/></svg><span>Chat</span></button>
     <button class="nav-btn" data-view="tasks"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m9 11 2 2 4-5"/><path d="M19 12a7 7 0 1 1-4.1-6.37"/></svg><span>Tasks</span></button>
@@ -667,6 +771,7 @@
   <script>
     (function(){
       var titles = {
+        home: ["Desk", "Home"],
         today: ["Desk", "Good evening, Shavor"],
         market: ["Broker-ranked movers", "Market scan"],
         chat: ["One room · three perspectives", "Desk conversation"],
@@ -683,10 +788,17 @@
         clearTimeout(toastTimer); toastTimer = setTimeout(function(){ toast.classList.remove('show'); }, 2300);
       }
       function switchView(name){
+        if (!titles[name]) name = 'home';
         views.forEach(function(v){ v.classList.toggle('active', v.id === name + 'View'); });
         navs.forEach(function(n){ n.classList.toggle('active', n.dataset.view === name); });
         document.getElementById('viewEyebrow').textContent = titles[name][0];
         document.getElementById('viewTitle').textContent = titles[name][1];
+        var mainEl = document.querySelector('.main');
+        if (mainEl) mainEl.classList.toggle('is-home', name === 'home');
+        var nextHash = '#' + name;
+        if (location.hash !== nextHash) {
+          try { history.replaceState(null, '', location.pathname + location.search + nextHash); } catch (e) {}
+        }
         window.scrollTo({top:0, behavior:'smooth'});
       }
       navs.forEach(function(btn){ btn.addEventListener('click', function(){ switchView(btn.dataset.view); }); });
@@ -1112,6 +1224,139 @@
           showToast(on ? 'One-answer routing on' : 'Roundtable preview on');
         });
       });
+
+      var homeItems = [];
+      var homeSpeakOn = false;
+      function homeEsc(s){
+        return String(s == null ? '' : s).replace(/[&<>"']/g, function(c){
+          return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]);
+        });
+      }
+      function visibleHeadlines(){
+        var q = (document.getElementById('homeSearch').value || '').trim().toLowerCase();
+        if (!q) return homeItems.slice();
+        return homeItems.filter(function(item){
+          var blob = ((item.title || '') + ' ' + (item.source || '') + ' ' + (item.summary || '')).toLowerCase();
+          return blob.indexOf(q) !== -1;
+        });
+      }
+      function renderHeadlines(){
+        var box = document.getElementById('homeHeadlines');
+        var rows = visibleHeadlines();
+        if (!homeItems.length) {
+          box.innerHTML = '<p class="home-empty" id="homeEmpty">No headlines right now.</p>';
+          return;
+        }
+        if (!rows.length) {
+          box.innerHTML = '<p class="home-empty">No headlines match that search.</p>';
+          return;
+        }
+        box.innerHTML = rows.map(function(item){
+          var img = item.image
+            ? '<img class="home-thumb" alt="" src="' + homeEsc(item.image) + '" loading="lazy" referrerpolicy="no-referrer" onerror="this.remove();this.parentElement&&this.parentElement.classList.add(\'no-img\')">'
+            : '';
+          var sum = item.summary ? '<p>' + homeEsc(item.summary) + '</p>' : '';
+          return '<a class="home-item' + (item.image ? '' : ' no-img') + '" href="' + homeEsc(item.link) + '" target="_blank" rel="noopener noreferrer">'
+            + img
+            + '<div><h3>' + homeEsc(item.title) + '</h3>' + sum
+            + '<div class="home-src">' + homeEsc(item.source || 'News') + '</div></div></a>';
+        }).join('');
+      }
+      function paintWeather(data){
+        var w = (data && data.weather) || {};
+        var temp = document.getElementById('homeTemp');
+        var cond = document.getElementById('homeCond');
+        var precip = document.getElementById('homePrecip');
+        var aqi = document.getElementById('homeAqi');
+        if (!w.ok || w.temperature_f == null) {
+          temp.textContent = '—';
+          cond.textContent = 'Weather unavailable';
+          precip.textContent = '';
+          aqi.textContent = '';
+        } else {
+          var n = Number(w.temperature_f);
+          temp.textContent = (Math.round(n * 10) / 10) + '°';
+          cond.textContent = w.condition || 'Now';
+          precip.textContent = (w.precip_chance_pct == null) ? '' : (w.precip_chance_pct + '% precip');
+          if (w.aqi == null) {
+            aqi.textContent = 'AQI unavailable';
+          } else {
+            var cls = w.aqi <= 50 ? '' : (w.aqi <= 100 ? ' warn' : ' bad');
+            aqi.innerHTML = '<i class="aqi-dot' + cls + '"></i> ' + w.aqi + ' AQI';
+          }
+        }
+        var sun = (data && data.sunset) || {};
+        var sunEl = document.getElementById('homeSunsetTime');
+        var sunSub = document.getElementById('homeSunsetSub');
+        if (sun.ok && sun.label) {
+          sunEl.textContent = sun.label;
+          sunSub.textContent = 'Taylors';
+        } else {
+          sunEl.textContent = '—';
+          sunSub.textContent = 'Sunset unavailable';
+        }
+      }
+      function loadHome(){
+        var tok = '';
+        try { tok = new URLSearchParams(location.search).get('token') || localStorage.getItem('desk_token') || ''; } catch (e) {}
+        if (!tok) {
+          paintWeather({weather:{ok:false}, sunset:{ok:false}});
+          document.getElementById('homeHeadlines').innerHTML = '<p class="home-empty">No headlines right now.</p>';
+          return;
+        }
+        fetch('/api/home?token=' + encodeURIComponent(tok)).then(function(r){
+          if (!r.ok) throw new Error('home ' + r.status);
+          return r.json();
+        }).then(function(data){
+          paintWeather(data);
+          homeItems = (data && data.headlines) || [];
+          if (!data || !data.headlines_ok) homeItems = [];
+          renderHeadlines();
+          if (!data || !data.headlines_ok) {
+            document.getElementById('homeHeadlines').innerHTML = '<p class="home-empty">Headlines unavailable.</p>';
+          }
+        }).catch(function(){
+          paintWeather({weather:{ok:false}, sunset:{ok:false}});
+          homeItems = [];
+          document.getElementById('homeHeadlines').innerHTML = '<p class="home-empty">Headlines unavailable.</p>';
+        });
+      }
+      document.getElementById('homeSearch').addEventListener('input', renderHeadlines);
+      document.getElementById('homeSearchForm').addEventListener('submit', function(e){ e.preventDefault(); renderHeadlines(); });
+      document.getElementById('homeSpeak').addEventListener('click', function(){
+        var btn = document.getElementById('homeSpeak');
+        if (!('speechSynthesis' in window)) { showToast('Read-aloud is not available here'); return; }
+        if (window.speechSynthesis.speaking || homeSpeakOn) {
+          homeSpeakOn = false;
+          btn.setAttribute('aria-pressed', 'false');
+          try { window.speechSynthesis.cancel(); } catch (e) {}
+          return;
+        }
+        var rows = visibleHeadlines();
+        var script = rows.length
+          ? ('Top headlines. ' + rows.map(function(item){ return item.title; }).join('. '))
+          : 'No headlines to read.';
+        try {
+          window.speechSynthesis.cancel();
+          var u = new SpeechSynthesisUtterance(script);
+          u.onend = function(){ homeSpeakOn = false; btn.setAttribute('aria-pressed', 'false'); };
+          u.onerror = u.onend;
+          homeSpeakOn = true;
+          btn.setAttribute('aria-pressed', 'true');
+          window.speechSynthesis.speak(u);
+        } catch (e) {
+          homeSpeakOn = false;
+          showToast('Read-aloud is not available here');
+        }
+      });
+      var startView = (location.hash || '#home').replace('#', '');
+      if (!titles[startView]) startView = 'home';
+      if (startView !== 'home') switchView(startView);
+      else if (location.hash !== '#home') {
+        try { history.replaceState(null, '', location.pathname + location.search + '#home'); } catch (e) {}
+      }
+      loadHome();
+
     })();
   </script>
 <script>
