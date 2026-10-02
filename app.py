@@ -700,24 +700,34 @@ async def weather(token: str = "", lat: float = 0.0, lng: float = 0.0):
 
 
 @app.get("/api/gainers")
-async def gainers(token: str = "", source: str = "combined", force: str = ""):
-    """Live top-gainers. Webull via public ranking API; Moomoo via OpenAPI
-    (MOOMOO_APP_KEY + MOOMOO_RSA_PRIVATE_KEY) or OpenD fallback. Cache ~2
-    minutes. force=1 bypasses cache (Refresh). Hard deadline so the
-    browser never sits on a proxy 502. Never invents prices — failures
-    return empty/partial items with an honest status/message."""
+async def gainers(
+    token: str = "",
+    source: str = "combined",
+    force: str = "",
+    list: str = "",
+    list_type: str = "",
+):
+    """Live top-gainers by source + session list.
+
+    Webull via public ranking API (rankType 1d/preMarket/afterMarket);
+    Moomoo via local OpenD ingest (preferred) or OpenAPI/OpenD fallback
+    for today's board. list / list_type = premarket|today|afterhours
+    (default today). force=1 bypasses cache. Never invents prices.
+    """
     if token != DESK_TOKEN:
         return JSONResponse({"error": "bad token"}, status_code=403)
     do_force = str(force).strip().lower() in ("1", "true", "yes", "refresh")
+    lt_raw = (list_type or list or "today").strip() or "today"
     try:
         payload = await asyncio.wait_for(
-            gainers_mod.get_gainers(source, force=do_force),
+            gainers_mod.get_gainers(source, force=do_force, list_type=lt_raw),
             timeout=16.0,
         )
     except asyncio.TimeoutError:
         payload = {
             "ok": False,
             "source": (source or "combined").strip().lower() or "combined",
+            "list_type": gainers_mod.normalize_list_type(lt_raw),
             "label": "Feed timed out",
             "items": [],
             "updated_at": now_iso(),
@@ -732,13 +742,19 @@ async def gainers(token: str = "", source: str = "combined", force: str = ""):
 
 @app.post("/api/gainers/ingest")
 async def gainers_ingest(request: Request):
-    """Accept local OpenD (or other) top-gainers push into Moomoo cache.
+    """Accept local OpenD top-gainers push into Moomoo cache by list_type.
 
     Railway cannot reach OpenD on the trading box (127.0.0.1:11111), so a
-    5-minute cron on that box POSTs here. Token-authed. Does not touch the
-    Webull live path. Body:
-      {"token": "...", "source": "moomoo", "items": [...],
-       "status"?, "message"?, "updated_at"?, "auth"?, "opend"?, "reason"?}
+    5-minute loop on that box POSTs here. Token-authed. Does not touch the
+    Webull live path.
+
+    Single body:
+      {"token": "...", "source": "moomoo", "list_type": "today",
+       "items": [...], "status"?, "message"?, "updated_at"?, ...}
+
+    Batch body (preferred for the three-session pusher):
+      {"token": "...", "source": "moomoo",
+       "lists": [{"list_type": "premarket", "items": [...]}, ...]}
     """
     try:
         body = await request.json()
@@ -749,16 +765,44 @@ async def gainers_ingest(request: Request):
     source = str(body.get("source") or "moomoo").strip().lower() or "moomoo"
     if source not in ("moomoo", "webull"):
         return JSONResponse({"error": "source must be moomoo or webull"}, status_code=400)
+
+    # Batch: three session lists in one POST
+    lists = body.get("lists")
+    if isinstance(lists, list) and lists:
+        cleaned = []
+        for entry in lists:
+            if not isinstance(entry, dict):
+                continue
+            items = entry.get("items")
+            if not isinstance(items, list):
+                items = []
+            if len(items) > 200:
+                items = items[:200]
+            cleaned.append({**entry, "items": items})
+        results = gainers_mod.ingest_gainers_batch(source, cleaned)
+        return JSONResponse({
+            "ok": True,
+            "source": source,
+            "count": sum(r.get("count") or 0 for r in results),
+            "results": results,
+            "updated_at": now_iso(),
+        })
+
     items = body.get("items")
     if items is None:
-        return JSONResponse({"error": "items required (list)"}, status_code=400)
+        return JSONResponse(
+            {"error": "items required (list) or lists required (batch)"},
+            status_code=400,
+        )
     if not isinstance(items, list):
         return JSONResponse({"error": "items must be a list"}, status_code=400)
     if len(items) > 200:
         items = items[:200]
+    lt = body.get("list_type") or body.get("list") or "today"
     stored = gainers_mod.ingest_gainers(
         source,
         items,
+        list_type=str(lt),
         status=body.get("status"),
         message=body.get("message"),
         updated_at=body.get("updated_at"),
@@ -770,6 +814,7 @@ async def gainers_ingest(request: Request):
     return JSONResponse({
         "ok": True,
         "source": source,
+        "list_type": stored.get("list_type") or gainers_mod.normalize_list_type(str(lt)),
         "count": len(stored.get("items") or []),
         "status": stored.get("status"),
         "message": stored.get("message"),

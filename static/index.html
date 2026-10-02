@@ -279,6 +279,9 @@
     .source-tabs { display:flex; flex-wrap:wrap; gap:6px; justify-content:flex-end; }
     .source-tab { border:1px solid var(--line); background:var(--surface-2); color:var(--muted); border-radius:10px; padding:7px 10px; font-size:11px; font-weight:700; cursor:pointer; }
     .source-tab.active { background:var(--accent); color:#fff; border-color:var(--accent); }
+    .list-tabs { display:flex; flex-wrap:wrap; gap:6px; margin:10px 0 4px; }
+    .list-tab { border:1px solid var(--line); background:transparent; color:var(--muted); border-radius:999px; padding:6px 12px; font-size:11px; font-weight:700; cursor:pointer; }
+    .list-tab.active { background:var(--surface-2); color:var(--text); border-color:var(--accent); }
     .movers-columns { display:grid; grid-template-columns:48px minmax(0,1fr) 94px 94px; gap:10px; padding:11px 22px; color:var(--muted); font:600 10px "IBM Plex Mono",monospace; border-bottom:1px solid var(--line); }
     .movers-columns span:nth-child(n+3) { text-align:right; }
     .feed-empty { padding:34px 22px 30px; text-align:center; }
@@ -533,6 +536,11 @@
                 <button class="ghost-btn" id="refreshGainers" type="button" aria-label="Refresh gainers">Refresh</button>
               </div>
             </div>
+            <div class="list-tabs" role="tablist" aria-label="Session list type">
+              <button class="list-tab" data-list="premarket" type="button">Pre-market</button>
+              <button class="list-tab active" data-list="today" type="button">Today</button>
+              <button class="list-tab" data-list="afterhours" type="button">After-hours</button>
+            </div>
             <div class="feed-meta" id="feedMeta">
               <span class="feed-status" id="feedStatusPill"><i></i><span id="feedStatusText">Checking feeds…</span></span>
               <p class="feed-updated" id="feedUpdated">Not refreshed yet</p>
@@ -685,13 +693,31 @@
       document.querySelectorAll('[data-go]').forEach(function(btn){ btn.addEventListener('click', function(){ switchView(btn.dataset.go); }); });
 
       var feedCopy = {
-        combined: ['Combined broker ranking · regular and extended hours', 'Combined feed not connected', 'No feed is connected, so this list is empty on purpose.'],
-        moomoo: ['Moomoo ranking · regular and extended hours', 'Moomoo feed not connected', 'A production broker or market-data connection is required before Moomoo-ranked movers can appear here.'],
-        webull: ['Webull ranking · regular and extended hours', 'Webull feed not connected', 'A production broker or market-data connection is required before Webull-ranked movers can appear here.']
+        combined: {
+          today: ['Combined · Today\'s top gainers', 'Combined feed not connected', 'No feed is connected, so this list is empty on purpose.'],
+          premarket: ['Combined · Pre-market top gainers', 'Combined feed not connected', 'No feed is connected, so this list is empty on purpose.'],
+          afterhours: ['Combined · After-hours top gainers', 'Combined feed not connected', 'No feed is connected, so this list is empty on purpose.']
+        },
+        moomoo: {
+          today: ['Moomoo · Today\'s top gainers', 'Moomoo feed not connected', 'A production broker or market-data connection is required before Moomoo-ranked movers can appear here.'],
+          premarket: ['Moomoo · Pre-market top gainers', 'Moomoo feed not connected', 'Waiting on local OpenD ingest for pre-market.'],
+          afterhours: ['Moomoo · After-hours top gainers', 'Moomoo feed not connected', 'Waiting on local OpenD ingest for after-hours.']
+        },
+        webull: {
+          today: ['Webull · Today\'s top gainers', 'Webull feed not connected', 'A production broker or market-data connection is required before Webull-ranked movers can appear here.'],
+          premarket: ['Webull · Pre-market top gainers', 'Webull feed not connected', 'Webull pre-market ranking via public API.'],
+          afterhours: ['Webull · After-hours top gainers', 'Webull feed not connected', 'Webull after-hours ranking via public API.']
+        }
       };
       var activeGainerSource = 'combined';
+      var activeGainerList = 'today';
       var lastGainersBySource = {};
       var lastCheckedBySource = {};
+      function feedCopyFor(source, list){
+        var bySrc = feedCopy[source] || feedCopy.combined;
+        return bySrc[list] || bySrc.today || feedCopy.combined.today;
+      }
+      function cacheKey(source, list){ return (source || 'combined') + ':' + (list || 'today'); }
       function fmtFeedTime(iso){
         try {
           var d = iso ? new Date(iso) : new Date();
@@ -791,7 +817,7 @@
         var title = document.getElementById('watchTitle');
         var status = document.getElementById('watchStatus');
         var hint = document.getElementById('watchHint');
-        var when = lastCheckedBySource[activeGainerSource] || (data && data.updated_at);
+        var when = lastCheckedBySource[cacheKey(activeGainerSource, activeGainerList)] || (data && data.updated_at);
         if (title) title.textContent = 'Scan list — not a live quote tape';
         if (status) {
           if (sum.count > 0) status.textContent = (sum.label || activeGainerSource) + ' · ' + sum.count + ' rows';
@@ -805,11 +831,12 @@
       function applyFeedSubtitle(data){
         var el = document.getElementById('feedSubtitle');
         if (!el) return;
-        var base = (feedCopy[activeGainerSource] || feedCopy.combined)[0];
+        var copy = feedCopyFor(activeGainerSource, activeGainerList);
+        var base = copy[0];
         if (activeGainerSource === 'combined' && data && data.label) {
-          el.textContent = data.label + ' · regular and extended hours';
+          el.textContent = data.label;
         } else if (data && data.message && (data.status === 'empty' || data.status === 'partial')) {
-          el.textContent = base.replace(' · regular and extended hours', '') + ' · ' + (data.status === 'empty' ? 'no gainers right now' : 'partial');
+          el.textContent = base + ' · ' + (data.status === 'empty' ? 'no gainers right now' : 'partial');
         } else {
           el.textContent = base;
         }
@@ -825,8 +852,8 @@
         var emptyTitle = document.getElementById('feedEmptyTitle');
         var emptyText = document.getElementById('feedEmptyText');
         var when = (data && data.updated_at) || new Date().toISOString();
-        lastCheckedBySource[activeGainerSource] = when;
-        lastGainersBySource[activeGainerSource] = data;
+        lastCheckedBySource[cacheKey(activeGainerSource, activeGainerList)] = when;
+        lastGainersBySource[cacheKey(activeGainerSource, activeGainerList)] = data;
         if (updated) updated.textContent = 'Last checked ' + fmtFeedTime(when);
         if (statusText) statusText.textContent = (data && (data.message || data.label)) || status;
         if (statusPill) {
@@ -834,13 +861,13 @@
           statusPill.classList.add(status === 'ok' ? 'ok' : (status === 'partial' ? 'empty' : status));
         }
         applyFeedSubtitle(data);
-        updateTodayGainersStatus(activeGainerSource === 'combined' ? data : (lastGainersBySource.combined || data));
+        updateTodayGainersStatus(activeGainerSource === 'combined' ? data : (lastGainersBySource[cacheKey('combined', activeGainerList)] || data));
         updateWatchSnapshot(data);
         if (!items.length) {
           if (list) { list.innerHTML = ''; list.hidden = true; }
           if (empty) empty.hidden = false;
           if (emptyTitle) emptyTitle.textContent = emptyTitleFor(status, activeGainerSource);
-          if (emptyText) emptyText.textContent = (data && data.message) || (feedCopy[activeGainerSource] || feedCopy.combined)[2];
+          if (emptyText) emptyText.textContent = (data && data.message) || feedCopyFor(activeGainerSource, activeGainerList)[2];
           return;
         }
         if (empty) empty.hidden = true;
@@ -857,14 +884,17 @@
       }
       function loadGainers(source, announce, force){
         activeGainerSource = source || activeGainerSource || 'combined';
-        var copy = feedCopy[activeGainerSource] || feedCopy.combined;
+        activeGainerList = activeGainerList || 'today';
+        var copy = feedCopyFor(activeGainerSource, activeGainerList);
         document.getElementById('feedSubtitle').textContent = copy[0];
         document.getElementById('feedStatusText').textContent = force ? 'Refreshing…' : 'Checking feed…';
         if (force) setRefreshBusy(true);
-        var keep = lastGainersBySource[activeGainerSource];
+        var keep = lastGainersBySource[cacheKey(activeGainerSource, activeGainerList)];
         var tok = '';
         try { tok = new URLSearchParams(location.search).get('token') || localStorage.getItem('desk_token') || ''; } catch (e) {}
-        var url = '/api/gainers?source=' + encodeURIComponent(activeGainerSource) + '&token=' + encodeURIComponent(tok);
+        var url = '/api/gainers?source=' + encodeURIComponent(activeGainerSource)
+          + '&list=' + encodeURIComponent(activeGainerList)
+          + '&token=' + encodeURIComponent(tok);
         if (force) url += '&force=1';
         return fetch(url).then(function(r){
           if (!r.ok) {
@@ -916,6 +946,12 @@
         document.querySelectorAll('.source-tab').forEach(function(t){ t.classList.remove('active'); });
         tab.classList.add('active');
         loadGainers(tab.dataset.source, true, false);
+      }); });
+      document.querySelectorAll('.list-tab').forEach(function(tab){ tab.addEventListener('click', function(){
+        document.querySelectorAll('.list-tab').forEach(function(t){ t.classList.remove('active'); });
+        tab.classList.add('active');
+        activeGainerList = tab.dataset.list || 'today';
+        loadGainers(activeGainerSource, true, false);
       }); });
       var refreshGainers = document.getElementById('refreshGainers');
       if (refreshGainers) refreshGainers.addEventListener('click', function(){ loadGainers(activeGainerSource, true, true); });

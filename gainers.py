@@ -20,8 +20,10 @@ Moomoo (preferred: gateway-free OpenAPI at webapi.moomoo.com):
 Ingest (Railway path):
   Local OpenD cannot be reached from Railway. A token-authed
   POST /api/gainers/ingest lets the trading box push Moomoo rows into an
-  in-memory cache; GET /api/gainers?source=moomoo prefers that cache when
-  fresh so the Moomoo tab stays populated.
+  in-memory cache keyed by list_type (premarket|today|afterhours).
+  GET /api/gainers?source=moomoo&list=today prefers that cache when fresh
+  so the Moomoo tab stays populated. Webull uses public rankType
+  1d / preMarket / afterMarket for the same three list types.
 """
 from __future__ import annotations
 
@@ -54,6 +56,36 @@ CACHE_TTL_SEC = 120
 # still serve (marked stale) so Last checked is never silent.
 INGEST_FRESH_SEC = 600       # 10 min — prefer ingest over live OpenAPI
 INGEST_STALE_SHOW_SEC = 3600  # 60 min — still show with stale banner
+LIST_TYPES = ("premarket", "today", "afterhours")
+LIST_TYPE_ALIASES = {
+    "pre": "premarket",
+    "pre_market": "premarket",
+    "pre-market": "premarket",
+    "premkt": "premarket",
+    "regular": "today",
+    "session": "today",
+    "intraday": "today",
+    "day": "today",
+    "1d": "today",
+    "ah": "afterhours",
+    "after": "afterhours",
+    "after_hours": "afterhours",
+    "after-hours": "afterhours",
+    "aftermarket": "afterhours",
+    "post": "afterhours",
+    "postmarket": "afterhours",
+}
+WEBULL_RANK_BY_LIST = {
+    "today": "1d",
+    "premarket": "preMarket",
+    "afterhours": "afterMarket",
+}
+LIST_LABELS = {
+    "premarket": "Pre-market top gainers",
+    "today": "Today's top gainers",
+    "afterhours": "After-hours top gainers",
+}
+
 WEBULL_URL = (
     "https://quotes-gw.webullfintech.com/api/wlas/ranking/topGainers"
 )
@@ -87,6 +119,22 @@ _ingest_cache: dict[str, dict[str, Any]] = {}
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def normalize_list_type(value: str | None) -> str:
+    raw = (value or "today").strip().lower()
+    if raw in LIST_TYPES:
+        return raw
+    return LIST_TYPE_ALIASES.get(raw, "today")
+
+
+def _cache_key(source: str, list_type: str) -> str:
+    return f"{(source or '').strip().lower()}:{normalize_list_type(list_type)}"
+
+
+def _ingest_key(source: str, list_type: str) -> str:
+    return _cache_key(source, list_type)
+
 
 
 def _fmt_pct(pct: float | None) -> str | None:
@@ -151,13 +199,25 @@ def _row(
     return out
 
 
-async def fetch_webull() -> dict[str, Any]:
-    """Fetch US top gainers from Webull public ranking API."""
+async def fetch_webull(list_type: str = "today") -> dict[str, Any]:
+    """Fetch US top gainers from Webull public ranking API for a session list."""
+    lt = normalize_list_type(list_type)
+    rank_type = WEBULL_RANK_BY_LIST.get(lt, "1d")
+    params = {
+        "regionId": 6,
+        "rankType": rank_type,
+        "pageIndex": 1,
+        "pageSize": 50,
+    }
+    endpoint = (
+        f"{WEBULL_URL}?regionId=6&rankType={rank_type}&pageIndex=1&pageSize=50"
+    )
+    session_label = LIST_LABELS.get(lt, lt)
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
             r = await client.get(
                 WEBULL_URL,
-                params=WEBULL_PARAMS,
+                params=params,
                 headers={
                     "User-Agent": "desk-box/1.0",
                     "Accept": "application/json",
@@ -166,14 +226,15 @@ async def fetch_webull() -> dict[str, Any]:
             r.raise_for_status()
             payload = r.json()
     except Exception as e:
-        log.warning("webull gainers fetch failed: %s", e)
+        log.warning("webull gainers fetch failed (%s): %s", lt, e)
         return {
             "items": [],
             "status": "error",
-            "message": f"Webull feed failed: {e}",
+            "message": f"Webull {session_label} failed: {e}",
             "reason": str(e),
             "updated_at": _now_iso(),
-            "endpoint": WEBULL_DOC,
+            "endpoint": endpoint,
+            "list_type": lt,
         }
 
     items: list[dict[str, Any]] = []
@@ -195,26 +256,28 @@ async def fetch_webull() -> dict[str, Any]:
         price = values.get("price")
         if price is None:
             price = ticker.get("close") or ticker.get("price")
-        items.append(
-            _row(
-                symbol=str(symbol).strip().upper(),
-                name=(ticker.get("name") or None),
-                last=price,
-                change_pct=change_pct,
-                volume=ticker.get("volume") or values.get("volume"),
-                source="webull",
-            )
+        row = _row(
+            symbol=str(symbol).strip().upper(),
+            name=(ticker.get("name") or None),
+            last=price,
+            change_pct=change_pct,
+            volume=ticker.get("volume") or values.get("volume"),
+            source="webull",
         )
+        row["list_type"] = lt
+        items.append(row)
 
     return {
         "items": items,
         "status": "ok" if items else "empty",
         "message": (
-            f"Webull US top gainers ({len(items)} names)"
-            if items else "Webull returned no gainers right now"
+            f"Webull US {session_label} ({len(items)} names)"
+            if items
+            else f"Webull returned no {session_label.lower()} right now"
         ),
         "updated_at": _now_iso(),
-        "endpoint": WEBULL_DOC,
+        "endpoint": endpoint,
+        "list_type": lt,
     }
 
 
@@ -733,6 +796,7 @@ def ingest_gainers(
     source: str,
     items: list[dict[str, Any]] | None,
     *,
+    list_type: str = "today",
     status: str | None = None,
     message: str | None = None,
     updated_at: str | None = None,
@@ -741,10 +805,12 @@ def ingest_gainers(
     endpoint: str | None = None,
     reason: str | None = None,
 ) -> dict[str, Any]:
-    """Store a pusher payload for source (typically moomoo). Sync-safe."""
+    """Store a pusher payload for source+list_type (typically moomoo). Sync-safe."""
     src = (source or "moomoo").strip().lower()
     if src not in ("moomoo", "webull"):
         src = "moomoo"
+    lt = normalize_list_type(list_type)
+    session_label = LIST_LABELS.get(lt, lt)
     clean: list[dict[str, Any]] = []
     for raw in items or []:
         if not isinstance(raw, dict):
@@ -756,19 +822,20 @@ def ingest_gainers(
         row["symbol"] = sym
         row.setdefault("source", src)
         row.setdefault("sources", [src])
+        row["list_type"] = lt
         clean.append(row)
     if status is None:
         status = "ok" if clean else "empty"
     if message is None:
-        message = (
-            f"Moomoo US top movers via local OpenD ingest ({len(clean)} names)"
-            if src == "moomoo" and clean
-            else (
-                f"{src} ingest empty"
-                if not clean
-                else f"{src} ingest ({len(clean)} names)"
+        if src == "moomoo" and clean:
+            message = (
+                f"Moomoo US {session_label} via local OpenD ingest "
+                f"({len(clean)} names)"
             )
-        )
+        elif not clean:
+            message = f"{src} {session_label.lower()} ingest empty"
+        else:
+            message = f"{src} {session_label.lower()} ingest ({len(clean)} names)"
     payload: dict[str, Any] = {
         "items": clean,
         "status": status,
@@ -778,6 +845,7 @@ def ingest_gainers(
         "ingested_mono": time.monotonic(),
         "ingest_source": "local_opend_push",
         "auth": auth or "opend_ingest",
+        "list_type": lt,
     }
     if opend:
         payload["opend"] = opend
@@ -785,10 +853,55 @@ def ingest_gainers(
         payload["endpoint"] = endpoint
     if reason:
         payload["reason"] = reason
-    # Store under lock via sync assignment — callers are async route or tests;
-    # Python dict assign is atomic enough; get_gainers reads under _lock.
-    _ingest_cache[src] = payload
-    return {k: v for k, v in payload.items() if k not in ("fetched_mono", "ingested_mono")}
+    key = _ingest_key(src, lt)
+    _ingest_cache[key] = payload
+    # Backward-compat: bare source key mirrors "today"
+    if lt == "today":
+        _ingest_cache[src] = payload
+    return {
+        k: v
+        for k, v in payload.items()
+        if k not in ("fetched_mono", "ingested_mono")
+    }
+
+
+def ingest_gainers_batch(
+    source: str,
+    lists: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Ingest multiple list_type payloads; each keeps its own updated_at."""
+    results: list[dict[str, Any]] = []
+    for entry in lists or []:
+        if not isinstance(entry, dict):
+            continue
+        lt = normalize_list_type(
+            entry.get("list_type") or entry.get("list") or "today"
+        )
+        stored = ingest_gainers(
+            source,
+            entry.get("items") if isinstance(entry.get("items"), list) else [],
+            list_type=lt,
+            status=entry.get("status"),
+            message=entry.get("message"),
+            updated_at=entry.get("updated_at"),
+            auth=entry.get("auth"),
+            opend=entry.get("opend"),
+            endpoint=entry.get("endpoint"),
+            reason=entry.get("reason"),
+        )
+        results.append(
+            {
+                "ok": True,
+                "source": (source or "moomoo").strip().lower() or "moomoo",
+                "list_type": lt,
+                "count": len(stored.get("items") or []),
+                "status": stored.get("status"),
+                "message": stored.get("message"),
+                "updated_at": stored.get("updated_at"),
+                "auth": stored.get("auth"),
+            }
+        )
+    return results
 
 
 def _ingest_age_sec(entry: dict[str, Any]) -> float | None:
@@ -798,44 +911,82 @@ def _ingest_age_sec(entry: dict[str, Any]) -> float | None:
     return time.monotonic() - float(mono)
 
 
-def peek_ingest(source: str) -> dict[str, Any] | None:
+def peek_ingest(source: str, list_type: str = "today") -> dict[str, Any] | None:
     """Return ingest payload without mono clocks, or None if missing/expired."""
     src = (source or "").strip().lower()
-    entry = _ingest_cache.get(src) or {}
+    lt = normalize_list_type(list_type)
+    entry = _ingest_cache.get(_ingest_key(src, lt)) or {}
+    # Legacy: older single-key cache treated as today
+    if not entry and lt == "today":
+        entry = _ingest_cache.get(src) or {}
     if not entry:
         return None
     age = _ingest_age_sec(entry)
     if age is None or age > INGEST_STALE_SHOW_SEC:
         return None
-    out = {k: v for k, v in entry.items() if k not in ("fetched_mono", "ingested_mono")}
+    out = {
+        k: v
+        for k, v in entry.items()
+        if k not in ("fetched_mono", "ingested_mono")
+    }
+    out.setdefault("list_type", lt)
     out["_ingest_age_sec"] = age
     out["_ingest_fresh"] = age <= INGEST_FRESH_SEC
     if age > INGEST_FRESH_SEC:
-        # Keep rows visible; stamp honesty into message for Last checked UX.
-        base = out.get("message") or f"{src} ingest"
-        out["message"] = f"{base} (stale ingest · {int(age)}s old — waiting for next local push)"
+        base = out.get("message") or f"{src} {lt} ingest"
+        out["message"] = (
+            f"{base} (stale ingest · {int(age)}s old — waiting for next local push)"
+        )
         if out.get("status") == "ok":
             out["status"] = "partial"
     return out
 
 
-async def _moomoo_with_ingest(*, force: bool = False) -> dict[str, Any]:
-    """Prefer local OpenD ingest cache for Moomoo; fall back to live fetch."""
-    ingest = peek_ingest("moomoo")
+async def _moomoo_with_ingest(
+    *, force: bool = False, list_type: str = "today"
+) -> dict[str, Any]:
+    """Prefer local OpenD ingest cache for Moomoo; fall back to live fetch.
+
+    Live OpenAPI/OpenD on Railway only covers the regular-session (today)
+    board. Premarket/afterhours rely on the local ingest pusher; we still
+    stamp Last checked from ingest even when the session list is empty.
+    """
+    lt = normalize_list_type(list_type)
+    ingest = peek_ingest("moomoo", lt)
     if ingest and ingest.get("_ingest_fresh") and not force:
         return {k: v for k, v in ingest.items() if not k.startswith("_")}
 
-    live = await _get_cached("moomoo", force=force)
+    # Premarket/AH: do not call Railway OpenAPI path (regular-session only).
+    if lt != "today":
+        if ingest:
+            return {k: v for k, v in ingest.items() if not k.startswith("_")}
+        return {
+            "items": [],
+            "status": "empty",
+            "message": (
+                f"Moomoo {LIST_LABELS.get(lt, lt)} waiting for local OpenD ingest"
+            ),
+            "updated_at": _now_iso(),
+            "list_type": lt,
+            "auth": "opend_ingest",
+        }
+
+    live = await _get_cached("moomoo", force=force, list_type=lt)
     live_ok = (live.get("status") == "ok") and bool(live.get("items"))
 
     if live_ok:
+        live = dict(live)
+        live["list_type"] = lt
         return live
 
     if ingest:
         # Live empty/not_connected/error — serve ingest (fresh or stale banner).
         return {k: v for k, v in ingest.items() if not k.startswith("_")}
 
+    live = dict(live)
+    live.setdefault("list_type", lt)
     return live
+
 
 def _stale(entry: dict[str, Any]) -> bool:
     if not entry:
@@ -846,23 +997,48 @@ def _stale(entry: dict[str, Any]) -> bool:
     return (time.monotonic() - fetched) > CACHE_TTL_SEC
 
 
-async def _refresh_one(source: str) -> dict[str, Any]:
+async def _refresh_one(
+    source: str, *, list_type: str = "today"
+) -> dict[str, Any]:
+    lt = normalize_list_type(list_type)
+    key = _cache_key(source, lt)
     if source == "webull":
-        result = await fetch_webull()
+        result = await fetch_webull(lt)
     elif source == "moomoo":
-        result = await fetch_moomoo()
+        # Live Moomoo path is regular-session only.
+        if lt != "today":
+            result = {
+                "items": [],
+                "status": "empty",
+                "message": (
+                    f"Moomoo live OpenAPI covers today's board only — "
+                    f"use local ingest for {LIST_LABELS.get(lt, lt)}"
+                ),
+                "updated_at": _now_iso(),
+                "list_type": lt,
+                "auth": "openapi_appkey",
+            }
+        else:
+            result = await fetch_moomoo()
+            result = dict(result)
+            result["list_type"] = lt
     else:
         raise ValueError(source)
     result["fetched_mono"] = time.monotonic()
+    result.setdefault("list_type", lt)
     async with _lock:
-        _cache[source] = result
+        _cache[key] = result
+        # Mirror legacy bare-source key for today so older callers keep working.
+        if lt == "today":
+            _cache[source] = result
     return result
 
 
 async def refresh_all() -> None:
+    # Warm today's boards (UI default). Premarket/AH come from ingest.
     await asyncio.gather(
-        _refresh_one("webull"),
-        _refresh_one("moomoo"),
+        _refresh_one("webull", list_type="today"),
+        _refresh_one("moomoo", list_type="today"),
         return_exceptions=True,
     )
 
@@ -894,7 +1070,13 @@ def _source_phrase(name: str, payload: dict[str, Any]) -> str:
     return f"{name} not connected"
 
 
-def _merge(webull: dict[str, Any], moomoo: dict[str, Any]) -> dict[str, Any]:
+def _merge(
+    webull: dict[str, Any],
+    moomoo: dict[str, Any],
+    *,
+    list_type: str = "today",
+) -> dict[str, Any]:
+    lt = normalize_list_type(list_type)
     by_sym: dict[str, dict[str, Any]] = {}
     # Prefer higher change_pct when deduping; keep both source tags.
     for src_payload in (webull, moomoo):
@@ -907,7 +1089,12 @@ def _merge(webull: dict[str, Any], moomoo: dict[str, Any]) -> dict[str, Any]:
                 row = dict(item)
                 row["sources"] = list(item.get("sources") or [item.get("source")])
                 # Single-source rows keep a plain source label.
-                row["source"] = row["sources"][0] if len(row["sources"]) == 1 else ",".join(row["sources"])
+                row["source"] = (
+                    row["sources"][0]
+                    if len(row["sources"]) == 1
+                    else ",".join(row["sources"])
+                )
+                row["list_type"] = lt
                 by_sym[sym] = row
                 continue
             srcs = list(existing.get("sources") or [])
@@ -915,7 +1102,11 @@ def _merge(webull: dict[str, Any], moomoo: dict[str, Any]) -> dict[str, Any]:
                 if s and s not in srcs:
                     srcs.append(s)
             existing["sources"] = srcs
-            existing["source"] = ",".join(srcs) if len(srcs) > 1 else (srcs[0] if srcs else existing.get("source"))
+            existing["source"] = (
+                ",".join(srcs)
+                if len(srcs) > 1
+                else (srcs[0] if srcs else existing.get("source"))
+            )
             # Keep the quote with the larger absolute move as display price.
             old_pct = _num(existing.get("change_pct")) or 0.0
             new_pct = _num(item.get("change_pct")) or 0.0
@@ -926,8 +1117,10 @@ def _merge(webull: dict[str, Any], moomoo: dict[str, Any]) -> dict[str, Any]:
 
     items = sorted(
         by_sym.values(),
-        key=lambda r: (_num(r.get("change_pct")) is not None,
-                       _num(r.get("change_pct")) or 0.0),
+        key=lambda r: (
+            _num(r.get("change_pct")) is not None,
+            _num(r.get("change_pct")) or 0.0,
+        ),
         reverse=True,
     )
 
@@ -941,7 +1134,8 @@ def _merge(webull: dict[str, Any], moomoo: dict[str, Any]) -> dict[str, Any]:
 
     w_phrase = _source_phrase("Webull", webull)
     m_phrase = _source_phrase("Moomoo", moomoo)
-    honest_label = f"Combined ({w_phrase}; {m_phrase})"
+    session = LIST_LABELS.get(lt, lt)
+    honest_label = f"Combined {session} ({w_phrase}; {m_phrase})"
 
     if w_ok and m_ok:
         status, message = "ok", (
@@ -959,7 +1153,6 @@ def _merge(webull: dict[str, Any], moomoo: dict[str, Any]) -> dict[str, Any]:
             )
         )
     elif w_live or m_live:
-        # Both connected but empty (or one empty + other disconnected with no rows)
         status, message = "empty", (
             f"{honest_label} · no gainers right now"
         )
@@ -969,12 +1162,19 @@ def _merge(webull: dict[str, Any], moomoo: dict[str, Any]) -> dict[str, Any]:
             f"Webull: {webull.get('message')}; Moomoo: {moomoo.get('message')}"
         )
 
+    # Prefer the freshest updated_at among sources when both stamped.
+    stamps = [
+        t for t in (webull.get("updated_at"), moomoo.get("updated_at")) if t
+    ]
+    updated = max(stamps) if stamps else _now_iso()
+
     return {
         "items": items,
         "status": status,
         "message": message,
         "label": honest_label,
-        "updated_at": _now_iso(),
+        "updated_at": updated,
+        "list_type": lt,
         "sources": {
             "webull": {
                 "status": webull.get("status"),
@@ -982,6 +1182,7 @@ def _merge(webull: dict[str, Any], moomoo: dict[str, Any]) -> dict[str, Any]:
                 "count": len(webull.get("items") or []),
                 "updated_at": webull.get("updated_at"),
                 "endpoint": webull.get("endpoint"),
+                "list_type": lt,
             },
             "moomoo": {
                 "status": moomoo.get("status"),
@@ -992,80 +1193,115 @@ def _merge(webull: dict[str, Any], moomoo: dict[str, Any]) -> dict[str, Any]:
                 "opend": moomoo.get("opend"),
                 "endpoint": moomoo.get("endpoint"),
                 "auth": moomoo.get("auth"),
+                "list_type": lt,
             },
         },
     }
 
 
-async def _get_cached(source: str, *, force: bool = False) -> dict[str, Any]:
+async def _get_cached(
+    source: str, *, force: bool = False, list_type: str = "today"
+) -> dict[str, Any]:
+    lt = normalize_list_type(list_type)
+    key = _cache_key(source, lt)
     async with _lock:
-        entry = dict(_cache.get(source) or {})
+        entry = dict(_cache.get(key) or _cache.get(source) or {})
+        # If legacy bare key is for a different list, ignore it.
+        if entry.get("list_type") and normalize_list_type(entry.get("list_type")) != lt:
+            if key not in _cache:
+                entry = {}
     if force or _stale(entry):
         try:
-            entry = await asyncio.wait_for(_refresh_one(source), timeout=12.0)
+            entry = await asyncio.wait_for(
+                _refresh_one(source, list_type=lt), timeout=12.0
+            )
         except asyncio.TimeoutError:
-            log.warning("%s gainers refresh timed out", source)
-            # Soft-fail: keep last cache if any, else honest timeout payload.
+            log.warning("%s/%s gainers refresh timed out", source, lt)
             if entry.get("items") is not None and entry.get("status"):
                 entry = dict(entry)
                 entry["message"] = (
-                    f"{entry.get('message') or source} (refresh timed out — showing last check)"
+                    f"{entry.get('message') or source} "
+                    f"(refresh timed out — showing last check)"
                 )
             else:
                 entry = {
                     "items": [],
                     "status": "error",
-                    "message": f"{source} feed timed out",
+                    "message": f"{source} {LIST_LABELS.get(lt, lt)} timed out",
                     "reason": "upstream refresh exceeded 12s budget",
                     "updated_at": _now_iso(),
                     "fetched_mono": time.monotonic(),
+                    "list_type": lt,
                 }
                 async with _lock:
-                    # Do not clobber a warmer concurrent write.
-                    if not _cache.get(source):
-                        _cache[source] = entry
+                    if not _cache.get(key):
+                        _cache[key] = entry
     out = {k: v for k, v in entry.items() if k != "fetched_mono"}
+    out.setdefault("list_type", lt)
     return out
 
 
-async def get_gainers(source: str = "combined", force: bool = False) -> dict[str, Any]:
-    """Return gainers for one tab. force=True bypasses cache (Refresh button).
+async def get_gainers(
+    source: str = "combined",
+    force: bool = False,
+    list_type: str = "today",
+) -> dict[str, Any]:
+    """Return gainers for one tab + session list.
 
-    Caps total wait so Railway/proxy does not 502 the browser. On timeout,
-    returns last-known rows when available with an honest message — never
-    invents prices.
+    force=True bypasses cache (Refresh button). Caps total wait so
+    Railway/proxy does not 502 the browser. On timeout, returns last-known
+    rows when available with an honest message — never invents prices.
     """
     src = (source or "combined").strip().lower()
     if src not in ("combined", "moomoo", "webull"):
         src = "combined"
+    lt = normalize_list_type(list_type)
+    session = LIST_LABELS.get(lt, lt)
 
     async def _load() -> dict[str, Any]:
         if src == "webull":
-            return await _get_cached("webull", force=force)
+            return await _get_cached("webull", force=force, list_type=lt)
         if src == "moomoo":
-            return await _moomoo_with_ingest(force=force)
+            return await _moomoo_with_ingest(force=force, list_type=lt)
         webull, moomoo = await asyncio.gather(
-            _get_cached("webull", force=force),
-            _moomoo_with_ingest(force=force),
+            _get_cached("webull", force=force, list_type=lt),
+            _moomoo_with_ingest(force=force, list_type=lt),
         )
-        return _merge(webull, moomoo)
+        return _merge(webull, moomoo, list_type=lt)
 
     try:
         data = await asyncio.wait_for(_load(), timeout=14.0)
     except asyncio.TimeoutError:
-        log.warning("get_gainers(%s) overall timeout", src)
-        # Best-effort snapshot from cache without blocking.
+        log.warning("get_gainers(%s/%s) overall timeout", src, lt)
         async with _lock:
-            w = {k: v for k, v in (_cache.get("webull") or {}).items() if k != "fetched_mono"}
-            m = {k: v for k, v in (_cache.get("moomoo") or {}).items() if k != "fetched_mono"}
+            w = {
+                k: v
+                for k, v in (
+                    _cache.get(_cache_key("webull", lt))
+                    or _cache.get("webull")
+                    or {}
+                ).items()
+                if k != "fetched_mono"
+            }
+            m = {
+                k: v
+                for k, v in (
+                    _cache.get(_cache_key("moomoo", lt))
+                    or _cache.get("moomoo")
+                    or {}
+                ).items()
+                if k != "fetched_mono"
+            }
         if src == "webull":
             data = w or {
-                "items": [], "status": "error",
-                "message": "Webull feed timed out — try Refresh again",
+                "items": [],
+                "status": "error",
+                "message": f"Webull {session} timed out — try Refresh again",
                 "updated_at": _now_iso(),
+                "list_type": lt,
             }
         elif src == "moomoo":
-            ingest = peek_ingest("moomoo")
+            ingest = peek_ingest("moomoo", lt)
             if ingest:
                 data = {k: v for k, v in ingest.items() if not k.startswith("_")}
                 data["message"] = (
@@ -1074,29 +1310,48 @@ async def get_gainers(source: str = "combined", force: bool = False) -> dict[str
                 )
             else:
                 data = m or {
-                    "items": [], "status": "error",
-                    "message": "Moomoo feed timed out — try Refresh again",
+                    "items": [],
+                    "status": "error",
+                    "message": f"Moomoo {session} timed out — try Refresh again",
                     "updated_at": _now_iso(),
+                    "list_type": lt,
                 }
         else:
             data = _merge(
-                w or {"items": [], "status": "error", "message": "Webull timed out"},
-                m or {"items": [], "status": "error", "message": "Moomoo timed out"},
+                w
+                or {
+                    "items": [],
+                    "status": "error",
+                    "message": "Webull timed out",
+                    "list_type": lt,
+                },
+                m
+                or {
+                    "items": [],
+                    "status": "error",
+                    "message": "Moomoo timed out",
+                    "list_type": lt,
+                },
+                list_type=lt,
             )
             data["message"] = (
                 (data.get("message") or "Combined feed timed out")
                 + " — try Refresh again"
             )
 
-    label = data.get("label") or LABELS[src]
+    label = data.get("label") or f"{LABELS[src]} · {session}"
     return {
         "ok": True,
         "source": src,
+        "list_type": lt,
         "label": label,
         "items": data.get("items") or [],
         "updated_at": data.get("updated_at") or _now_iso(),
         "status": data.get("status") or "not_connected",
         "message": data.get("message") or f"{src} feed not connected",
-        **{k: data[k] for k in ("reason", "endpoint", "opend", "auth", "sources", "label")
-           if k in data and k != "label"},
+        **{
+            k: data[k]
+            for k in ("reason", "endpoint", "opend", "auth", "sources")
+            if k in data
+        },
     }
