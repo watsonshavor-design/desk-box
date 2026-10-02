@@ -130,16 +130,21 @@ DESK_TOKEN = os.environ.get("DESK_TOKEN") or secrets.token_urlsafe(24)
 
 # Static desk context shown in the room's side panel (update as the desk evolves).
 DESK_CONTEXT = {
-    "goal": "$1M trading profit by Sep 2027 — working pace 8-10%/week",
-    "glnd_lock": ("GLND stock sold — qty 0. The old waiting-sell / $7 lock is retired. "
-                  "Do not brief 'Sell GLND at $7' or treat GLND stock as an open position. "
-                  "Confirm live book before mentioning any GLND residue (options/calls)."),
-    "risk": ("Standing rules: max 3 names, max $1,500/name, kill switches -$150 day / -$450 week / -$900 month. "
-             "Nothing is banned — any ticker is eligible."),
-    "notes": ("General-purpose room: trading, research, learning, daily life, "
-              "any questions — everyone answers, no hierarchy. "
-              "Penny stocks allowed. Nothing-under-$5 retired. "
-              "Day trades, flat overnight by default. Night Desk joins via paste relay."),
+    "goal": ("$1M trading profit — 100%+/week target with compounding; "
+             "flag $15k balance milestone immediately"),
+    "glnd_lock": ("GLND: old $7 waiting-sell lock CANCELLED. Exit shares only at $6.18+ "
+                  "(profit only — do not sell early below). Confirm live book for shares/calls "
+                  "before briefing; do not brief 'Sell GLND at $7'."),
+    "risk": ("Standing Hard Limits: KEEP THE ACCOUNT ALIVE. Always keep $2,000–$3,000 settled "
+             "withdrawable cash (never deploy below $2k). If account approaches $6,000, alert "
+             "Shavor — do NOT liquidate. No position size caps / no 3-name max / no kill switches. "
+             "Nothing is banned — any ticker eligible. GLND: exit shares only at $6.18+. "
+             "KALA: WATCH ONLY — do not sell without Shavor's explicit word; targets $0.80–$1.00+; "
+             "updates/alerts only. Options incl. naked allowed if max loss stated and account-safe. "
+             "Ask Shavor when in doubt."),
+    "notes": ("General-purpose room: trading, research, learning, daily life — everyone answers, "
+              "no hierarchy. Penny stocks allowed. Prefer flat overnight by default. "
+              "KALA is watch-only (no sell without Shavor). Night Desk joins via paste relay."),
 }
 
 app = FastAPI(title="Desk Box")
