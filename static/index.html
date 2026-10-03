@@ -496,6 +496,24 @@
     .kill-btn { background:#b64855; }
     .kill-btn.armed { background:#7a1220; }
     .kill-btn:disabled, .tap-48:disabled { opacity:.55; cursor:default; }
+
+    .enter-vr-wrap { margin: 0 0 16px; }
+    .enter-vr {
+      min-height: 48px; min-width: 48px; padding: 12px 22px;
+      border: 0; border-radius: 16px; cursor: pointer;
+      font: inherit; font-size: 16px; font-weight: 800; letter-spacing: .04em;
+      color: #f4fbff;
+      background:
+        linear-gradient(180deg, rgba(90, 210, 255, .35), rgba(28, 16, 58, .72)),
+        #12182c;
+      box-shadow: 0 10px 28px rgba(40, 80, 160, .22), inset 0 0 0 1px rgba(160, 220, 255, .4);
+    }
+    .enter-vr:disabled { opacity: .72; cursor: default; }
+    .enter-vr-note:empty { display: none; }
+    @media (max-width: 700px) {
+      .enter-vr { display: block; width: 100%; }
+    }
+
     #journalText {
       width:100%; box-sizing:border-box; min-height:96px; margin-top:8px;
       border-radius:12px; border:1px solid var(--line); padding:12px;
@@ -940,6 +958,10 @@
             <button type="button" class="home-chip" data-go="youtube">YouTube</button>
             <button type="button" class="home-chip" data-go="briefing">Briefing</button>
             <button type="button" class="home-chip" data-go="family">Elijah &amp; Natalia</button>
+          </div>
+          <div class="enter-vr-wrap">
+            <button type="button" class="tap-48 enter-vr" id="enterVr">Enter VR</button>
+            <p class="home-quiet enter-vr-note" id="enterVrNote" aria-live="polite"></p>
           </div>
           <div class="home-cards" id="homeCards">
             <article class="home-info home-compact" id="homeWeather">
@@ -2952,6 +2974,23 @@ if(priorBtn) priorBtn.onclick = async () => {
   }
 };
 
+</script>
+
+<script src="/static/desk-vr.js"></script>
+<script>
+(function () {
+  var btn = document.getElementById("enterVr");
+  if (!btn || window.DeskVR) return;
+  try {
+    if (!navigator.xr) {
+      btn.textContent = "Headset browser required";
+      btn.disabled = true;
+    }
+  } catch (e) {
+    btn.textContent = "Headset browser required";
+    btn.disabled = true;
+  }
+})();
 </script>
 </body>
 </html>
