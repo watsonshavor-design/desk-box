@@ -658,7 +658,7 @@
             <article class="home-info" id="homeMapsCard">
               <p class="home-kicker">Directions</p>
               <p class="home-big home-desk-label">Maps</p>
-              <p class="home-sub">Type an address. No login.</p>
+              <p class="home-sub">From 347 S Pinecroft Dr, Taylors, SC 29687</p>
               <button type="button" class="home-chip" data-go="maps">Open maps</button>
             </article>
           </div>
@@ -839,11 +839,11 @@
         <div class="card maps-panel" style="border-radius:24px;padding:22px;">
           <p class="section-label">MAPS</p>
           <h2 style="margin:0 0 6px;letter-spacing:-.03em;">Directions</h2>
-          <p class="maps-note">One address opens as the destination. Add a start only when you want a from / to route. This uses Google Maps. No account and no API key.</p>
+          <p class="maps-note">Your usual starting address is filled in below. Edit it any time, or enter a destination to get directions. This uses Google Maps. No account and no API key.</p>
           <form class="maps-form" id="mapsForm">
             <div>
-              <label for="mapsFrom">From <span style="font-weight:600;color:var(--muted)">(optional)</span></label>
-              <input id="mapsFrom" type="text" autocomplete="street-address" enterkeyhint="next" placeholder="Start address">
+              <label for="mapsFrom">From</label>
+              <input id="mapsFrom" type="text" value="347 S Pinecroft Dr, Taylors, SC 29687" autocomplete="street-address" enterkeyhint="next" placeholder="Start address">
             </div>
             <div>
               <label for="mapsTo">To</label>
@@ -1503,6 +1503,9 @@
         if (apple) apple.href = '/icon-mark.png?size=180&v=' + stamp;
       }
       fetch('/api/theme').then(function(r){ return r.ok ? r.json() : null; }).then(applyMark).catch(function(){});
+      var defaultMapsHome = '347 S Pinecroft Dr, Taylors, SC 29687';
+      var mapsFrom = document.getElementById('mapsFrom');
+      if (mapsFrom && !mapsFrom.value) mapsFrom.value = defaultMapsHome;
       document.getElementById('mapsForm').addEventListener('submit', function(e){
         e.preventDefault();
         var to = (document.getElementById('mapsTo').value || '').trim();
