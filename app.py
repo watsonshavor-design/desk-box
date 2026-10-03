@@ -837,11 +837,353 @@ async def index(token: str = ""):
     )
 
 
+# Local desk-exec state. Railway does not have this tree; missing files stay unknown.
+DESK_EXEC_ROOT = os.environ.get("DESK_EXEC_ROOT", "/workspace/desk-exec")
+DESK_STATUS_STALE_SEC = 180
+FLOOR_WATCH_LABEL = "Floor watch $6,000"
+JOURNAL_PATH = os.path.join(DATA_DIR, "desk-journal.jsonl")
+JOURNAL_MAX = 2000
+ECON_CALENDAR_URL = "https://nfs.faireconomy.media/ff_calendar_thisweek.json"
+_journal_lock = asyncio.Lock()
+_econ_cache = {"at": 0.0, "ok": False, "events": []}
+_OPEN_QUEUE_STATUSES = {"pending", "submitted", "working", "open", "queued"}
+_TERMINAL_QUEUE_STATUSES = {
+    "filled", "halted", "cancelled", "canceled", "rejected", "expired", "failed",
+}
+
+
+def session_name(now=None):
+    """Weekday session clock in America/New_York. Weekends are closed."""
+    now = now or datetime.now(ZoneInfo(TAYLORS_TZ))
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=ZoneInfo(TAYLORS_TZ))
+    else:
+        now = now.astimezone(ZoneInfo(TAYLORS_TZ))
+    if now.weekday() >= 5:
+        return "closed"
+    minutes = now.hour * 60 + now.minute
+    if 4 * 60 <= minutes < 9 * 60 + 30:
+        return "pre-market"
+    if 9 * 60 + 30 <= minutes < 16 * 60:
+        return "regular"
+    if 16 * 60 <= minutes < 20 * 60:
+        return "after-hours"
+    return "closed"
+
+
+def _desk_state_dir():
+    root = os.path.realpath(DESK_EXEC_ROOT)
+    state = os.path.realpath(os.path.join(root, "state"))
+    if not state.startswith(root + os.sep):
+        return None
+    if not os.path.isdir(state):
+        return None
+    return state
+
+
+def _read_json_file(path):
+    try:
+        with open(path, "r", encoding="utf-8") as handle:
+            data = json.load(handle)
+    except (OSError, ValueError, json.JSONDecodeError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def _parse_et(value):
+    if not isinstance(value, str) or not value.strip():
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.strip())
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=ZoneInfo(TAYLORS_TZ))
+    return parsed.astimezone(ZoneInfo(TAYLORS_TZ))
+
+
+def _status_age_sec(payload):
+    stamps = []
+    for key in ("last_watchdog_tick", "updated_at"):
+        parsed = _parse_et(payload.get(key) if isinstance(payload, dict) else None)
+        if parsed is not None:
+            stamps.append(parsed)
+    if not stamps:
+        return None
+    newest = max(stamps)
+    return (datetime.now(ZoneInfo(TAYLORS_TZ)) - newest).total_seconds()
+
+
+def _queue_open_count(root):
+    path = os.path.join(root, "queue", "approved_orders.json")
+    data = _read_json_file(path)
+    if not data or not isinstance(data.get("orders"), list):
+        return None
+    count = 0
+    for order in data["orders"]:
+        if not isinstance(order, dict):
+            return None
+        status = order.get("status")
+        if not isinstance(status, str):
+            return None
+        status = status.strip().lower()
+        if status in _OPEN_QUEUE_STATUSES:
+            count += 1
+        elif status not in _TERMINAL_QUEUE_STATUSES:
+            return None
+    return count
+
+
+def desk_trading_status():
+    """Facts from local desk-exec files only. Never invents a live book."""
+    state = _desk_state_dir()
+    unknown = {
+        "reachable": False,
+        "daemon": "unknown",
+        "daemon_as_of": None,
+        "opend": "unknown",
+        "trade_unlocked": "unknown",
+        "open_orders": None,
+        "open_orders_label": "unknown",
+        "kill_file": "unknown",
+    }
+    if state is None:
+        return unknown
+    root = os.path.dirname(state)
+    kill_path = os.path.join(state, "KILL")
+    kill_present = os.path.isfile(kill_path) and not os.path.islink(kill_path)
+    payload = _read_json_file(os.path.join(state, "daemon_status.json"))
+    age = _status_age_sec(payload) if payload else None
+    fresh = age is not None and age <= DESK_STATUS_STALE_SEC
+    if payload is None or age is None:
+        daemon = "unknown"
+    elif fresh:
+        daemon = "alive"
+    else:
+        daemon = "dead"
+    as_of = None
+    if isinstance(payload, dict):
+        as_of = payload.get("last_watchdog_tick") or payload.get("updated_at")
+        if not isinstance(as_of, str):
+            as_of = None
+    if not fresh or not isinstance(payload, dict) or not isinstance(payload.get("opend_ok"), bool):
+        opend = "unknown"
+    else:
+        opend = "connected" if payload["opend_ok"] else "down"
+    if kill_present:
+        unlocked = "no"
+    elif fresh and isinstance(payload, dict):
+        unlock = payload.get("unlock_present")
+        live = payload.get("LIVE_TRADING_ENABLED")
+        halted = payload.get("halted_for_kill")
+        if unlock is True and live is True and halted is False:
+            unlocked = "yes"
+        elif unlock is False or live is False or halted is True:
+            unlocked = "no"
+        else:
+            unlocked = "unknown"
+    else:
+        unlocked = "unknown"
+    open_count = _queue_open_count(root)
+    return {
+        "reachable": True,
+        "daemon": daemon,
+        "daemon_as_of": as_of,
+        "opend": opend,
+        "trade_unlocked": unlocked,
+        "open_orders": open_count,
+        "open_orders_label": "unknown" if open_count is None else str(open_count),
+        "open_orders_source": None if open_count is None else "desk queue",
+        "kill_file": "present" if kill_present else "absent",
+    }
+
+
+def desk_account_snapshot():
+    """No stored book snapshot. Floor label only — no invented dollars."""
+    return {
+        "book_loaded": False,
+        "equity": None,
+        "pnl_today": None,
+        "distance_to_floor": None,
+        "floor_label": FLOOR_WATCH_LABEL,
+    }
+
+
+def write_kill_file():
+    """Create the same state/KILL halt file. Does not cancel or place orders."""
+    state = _desk_state_dir()
+    if state is None:
+        return {"ok": False, "error": "desk state is not on this server", "written": False}
+    path = os.path.join(state, "KILL")
+    if os.path.islink(path):
+        return {"ok": False, "error": "kill path is not a regular file", "written": False}
+    if os.path.isfile(path):
+        return {"ok": True, "written": False, "already": True}
+    stamp = datetime.now(ZoneInfo(TAYLORS_TZ)).isoformat()
+    flags = os.O_CREAT | os.O_EXCL | os.O_WRONLY
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    try:
+        fd = os.open(path, flags, 0o644)
+    except FileExistsError:
+        return {"ok": True, "written": False, "already": True}
+    except OSError:
+        return {"ok": False, "error": "could not write kill file", "written": False}
+    try:
+        os.write(fd, (stamp + "\n").encode("utf-8"))
+    finally:
+        os.close(fd)
+    return {"ok": True, "written": True, "already": False}
+
+
+def _journal_rows(limit=20):
+    if not os.path.isfile(JOURNAL_PATH):
+        return []
+    rows = []
+    try:
+        with open(JOURNAL_PATH, "r", encoding="utf-8") as handle:
+            for line in handle:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    item = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if isinstance(item, dict) and isinstance(item.get("text"), str) and isinstance(item.get("ts"), str):
+                    rows.append({"ts": item["ts"], "text": item["text"]})
+    except OSError:
+        return []
+    return rows[-limit:]
+
+
+async def _fetch_usd_econ_today(client):
+    now = time.time()
+    if _econ_cache["ok"] and (now - _econ_cache["at"]) < 600:
+        return True, list(_econ_cache["events"])
+    try:
+        resp = await client.get(ECON_CALENDAR_URL, timeout=8.0, headers={"User-Agent": "desk-box"})
+        resp.raise_for_status()
+        data = resp.json()
+    except (httpx.HTTPError, ValueError, json.JSONDecodeError):
+        return False, []
+    if not isinstance(data, list):
+        return False, []
+    today = datetime.now(ZoneInfo(TAYLORS_TZ)).date()
+    events = []
+    for item in data:
+        if not isinstance(item, dict):
+            continue
+        if item.get("country") != "USD":
+            continue
+        when = _parse_et(item.get("date"))
+        title = item.get("title")
+        if when is None or when.date() != today or not isinstance(title, str) or not title.strip():
+            continue
+        events.append({
+            "title": title.strip()[:160],
+            "time_et": when.strftime("%-I:%M %p ET"),
+            "impact": item.get("impact") if isinstance(item.get("impact"), str) else "",
+            "_sort": when.isoformat(),
+        })
+    events.sort(key=lambda row: row["_sort"])
+    for row in events:
+        row.pop("_sort", None)
+    _econ_cache["at"] = now
+    _econ_cache["ok"] = True
+    _econ_cache["events"] = events
+    return True, events
+
+
 @app.get("/api/desk")
 async def desk(token: str = ""):
     if token != DESK_TOKEN:
         return JSONResponse({"error": "bad token"}, status_code=403)
     return JSONResponse(DESK_CONTEXT)
+
+
+@app.get("/api/desk/trading")
+async def desk_trading(token: str = ""):
+    if not _token_match(token):
+        return JSONResponse({"error": "bad token"}, status_code=403)
+    return JSONResponse(desk_trading_status())
+
+
+@app.get("/api/desk/account")
+async def desk_account(token: str = ""):
+    if not _token_match(token):
+        return JSONResponse({"error": "bad token"}, status_code=403)
+    return JSONResponse(desk_account_snapshot())
+
+
+@app.get("/api/desk/morning")
+async def desk_morning(token: str = ""):
+    if not _token_match(token):
+        return JSONResponse({"error": "bad token"}, status_code=403)
+    now = datetime.now(ZoneInfo(TAYLORS_TZ))
+    async with httpx.AsyncClient() as client:
+        loaded, events = await _fetch_usd_econ_today(client)
+    return JSONResponse({
+        "session": session_name(now),
+        "as_of": now.isoformat(),
+        "timezone": TAYLORS_TZ,
+        "econ_loaded": loaded,
+        "econ_events": events if loaded else [],
+        "movers_loaded": False,
+        "movers": [],
+        "movers_note": "none loaded",
+    })
+
+
+@app.post("/api/desk/kill")
+async def desk_kill(request: Request, token: str = ""):
+    """Second-step halt. Writes state/KILL only. Does not touch positions or orders."""
+    if not _token_match(token):
+        return JSONResponse({"error": "bad token"}, status_code=403)
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    if not isinstance(body, dict) or body.get("confirm") != "KILL":
+        return JSONResponse({"ok": False, "error": "confirm required"}, status_code=400)
+    result = write_kill_file()
+    status = 200 if result.get("ok") else 409
+    return JSONResponse(result, status_code=status)
+
+
+@app.get("/api/journal")
+async def journal_list(token: str = ""):
+    if not _token_match(token):
+        return JSONResponse({"error": "bad token"}, status_code=403)
+    async with _journal_lock:
+        notes = _journal_rows()
+    return JSONResponse({"notes": notes})
+
+
+@app.post("/api/journal")
+async def journal_add(request: Request, token: str = ""):
+    if not _token_match(token):
+        return JSONResponse({"error": "bad token"}, status_code=403)
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    text_in = body.get("text") if isinstance(body, dict) else None
+    if not isinstance(text_in, str):
+        return JSONResponse({"ok": False, "error": "text required"}, status_code=400)
+    note = " ".join(text_in.replace("\r", " ").split())
+    if not note:
+        return JSONResponse({"ok": False, "error": "text required"}, status_code=400)
+    if len(note) > JOURNAL_MAX:
+        return JSONResponse({"ok": False, "error": "too long"}, status_code=400)
+    row = {"ts": datetime.now(ZoneInfo(TAYLORS_TZ)).isoformat(), "text": note}
+    async with _journal_lock:
+        try:
+            with open(JOURNAL_PATH, "a", encoding="utf-8") as handle:
+                handle.write(json.dumps(row, ensure_ascii=False) + "\n")
+        except OSError:
+            return JSONResponse({"ok": False, "error": "could not save"}, status_code=500)
+    return JSONResponse({"ok": True, "note": row})
 
 
 @app.get("/api/weather")

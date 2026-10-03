@@ -456,6 +456,27 @@
     .main.is-home .topbar { display: none; }
     .main.is-home { padding-top: 28px; }
 
+
+    .home-ops { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-top:10px; }
+    .ops-card { min-width: 0; }
+    .ops-facts { list-style:none; margin:8px 0 0; padding:0; display:grid; gap:8px; }
+    .ops-facts li { display:flex; justify-content:space-between; align-items:center; gap:12px; min-height:48px; font-size:15px; font-weight:650; }
+    .ops-facts strong { font-weight:800; text-align:right; }
+    .tap-48, .nav-list .nav-btn, .mobile-nav .nav-btn { min-height:48px; min-width:48px; }
+    .tap-48 {
+      border:0; border-radius:14px; padding:12px 16px; font-size:15px; font-weight:800;
+      cursor:pointer; background:var(--accent); color:#fff;
+    }
+    .kill-btn { background:#b64855; }
+    .kill-btn.armed { background:#7a1220; }
+    .kill-btn:disabled, .tap-48:disabled { opacity:.55; cursor:default; }
+    #journalText {
+      width:100%; box-sizing:border-box; min-height:96px; margin-top:8px;
+      border-radius:12px; border:1px solid var(--line); padding:12px;
+      font:inherit; background:var(--surface-2); color:var(--ink); resize:vertical;
+    }
+    @media (max-width: 720px) { .home-ops { grid-template-columns:1fr; } }
+
     .mobile-nav { display:none; }
 
     @media (max-width: 980px) {
@@ -710,6 +731,44 @@
                 <p>Leave by <strong id="homeLeaveClock"></strong></p>
                 <p id="homeDriveLine"></p>
               </div>
+            </article>
+          </div>
+
+          <div class="home-ops" id="homeOps">
+            <article class="home-info ops-card" id="homeTrading">
+              <p class="home-kicker">Trading</p>
+              <ul class="ops-facts" id="tradingFacts">
+                <li><span>Daemon</span><strong id="tradeDaemon">unknown</strong></li>
+                <li><span>OpenD</span><strong id="tradeOpend">unknown</strong></li>
+                <li><span>Trade unlocked</span><strong id="tradeUnlocked">unknown</strong></li>
+                <li><span>Open orders</span><strong id="tradeOrders">unknown</strong></li>
+              </ul>
+              <p class="home-quiet" id="tradeOrdersNote"></p>
+              <button type="button" class="tap-48 kill-btn" id="killBtn">KILL</button>
+              <p class="home-quiet" id="killNote">Second tap writes the desk halt. It does not close positions.</p>
+            </article>
+            <article class="home-info ops-card" id="homeAccount">
+              <p class="home-kicker">Account</p>
+              <ul class="ops-facts" id="accountFacts">
+                <li><span>Equity</span><strong id="acctEquity">unknown</strong></li>
+                <li><span>Today's P/L</span><strong id="acctPnl">unknown</strong></li>
+                <li><span>Distance to floor</span><strong id="acctDistance">unknown</strong></li>
+              </ul>
+              <p class="home-quiet" id="acctFloor">Floor watch $6,000</p>
+            </article>
+            <article class="home-info ops-card" id="homeMorning">
+              <p class="home-kicker">Morning</p>
+              <p class="home-big home-desk-label" id="sessionClock">…</p>
+              <p class="home-sub" id="econLine">Econ events: …</p>
+              <ul class="ops-facts" id="econList"></ul>
+              <p class="home-sub" id="moversLine">Watchlist movers: none loaded</p>
+            </article>
+            <article class="home-info ops-card" id="homeJournal">
+              <p class="home-kicker">Journal</p>
+              <label class="home-sub" for="journalText">Typed note, saved with an ET time</label>
+              <textarea id="journalText" maxlength="2000" placeholder="Type a note"></textarea>
+              <button type="button" class="tap-48" id="journalSave">Save note</button>
+              <ul class="ops-facts" id="journalList"></ul>
             </article>
           </div>
           <div class="home-head"><h2>Top headlines</h2></div>
@@ -1517,6 +1576,180 @@
           document.getElementById('homeHeadlines').innerHTML = '<p class="home-empty">Headlines unavailable.</p>';
         });
       }
+
+      function deskTok(){
+        try { return new URLSearchParams(location.search).get('token') || localStorage.getItem('desk_token') || ''; } catch (e) { return ''; }
+      }
+      function etParts(d){
+        var fmt = new Intl.DateTimeFormat('en-US', { timeZone:'America/New_York', weekday:'short', hour:'2-digit', minute:'2-digit', hourCycle:'h23' });
+        var parts = {};
+        fmt.formatToParts(d).forEach(function(p){ parts[p.type] = p.value; });
+        return parts;
+      }
+      function sessionName(d){
+        var p = etParts(d || new Date());
+        if (p.weekday === 'Sat' || p.weekday === 'Sun') return 'closed';
+        var hour = parseInt(p.hour, 10);
+        if (hour === 24) hour = 0;
+        var mins = hour * 60 + parseInt(p.minute, 10);
+        if (mins >= 240 && mins < 570) return 'pre-market';
+        if (mins >= 570 && mins < 960) return 'regular';
+        if (mins >= 960 && mins < 1200) return 'after-hours';
+        return 'closed';
+      }
+      function paintSession(){
+        var el = document.getElementById('sessionClock');
+        if (el) el.textContent = sessionName(new Date());
+      }
+      function paintTrading(data){
+        data = data || {};
+        document.getElementById('tradeDaemon').textContent = data.daemon || 'unknown';
+        document.getElementById('tradeOpend').textContent = data.opend || 'unknown';
+        document.getElementById('tradeUnlocked').textContent = data.trade_unlocked || 'unknown';
+        var orders = document.getElementById('tradeOrders');
+        var note = document.getElementById('tradeOrdersNote');
+        if (data.open_orders === 0 || typeof data.open_orders === 'number') {
+          orders.textContent = String(data.open_orders);
+          note.textContent = data.open_orders_source === 'desk queue' ? 'Desk queue only. Not the broker book.' : '';
+        } else {
+          orders.textContent = 'unknown';
+          note.textContent = '';
+        }
+        var killNote = document.getElementById('killNote');
+        if (data.reachable === false) {
+          killNote.textContent = 'Desk state is not on this server. KILL was not written.';
+        } else if (data.kill_file === 'present') {
+          killNote.textContent = 'Halt file is already there. Trading stays stopped until that file is removed.';
+        }
+      }
+      function paintAccount(data){
+        data = data || {};
+        document.getElementById('acctEquity').textContent = data.book_loaded && data.equity != null ? String(data.equity) : 'unknown';
+        document.getElementById('acctPnl').textContent = data.book_loaded && data.pnl_today != null ? String(data.pnl_today) : 'unknown';
+        document.getElementById('acctDistance').textContent = data.book_loaded && data.distance_to_floor != null ? String(data.distance_to_floor) : 'unknown';
+        document.getElementById('acctFloor').textContent = data.floor_label || 'Floor watch $6,000';
+      }
+      function paintMorning(data){
+        data = data || {};
+        if (data.session) document.getElementById('sessionClock').textContent = data.session;
+        var line = document.getElementById('econLine');
+        var list = document.getElementById('econList');
+        list.innerHTML = '';
+        if (!data.econ_loaded) {
+          line.textContent = 'Econ events: none loaded';
+        } else if (!data.econ_events || !data.econ_events.length) {
+          line.textContent = 'Econ events: no US events today';
+        } else {
+          line.textContent = 'Econ events';
+          data.econ_events.slice(0, 8).forEach(function(ev){
+            var li = document.createElement('li');
+            var name = document.createElement('span');
+            var when = document.createElement('strong');
+            name.textContent = ev.title || '';
+            when.textContent = ev.time_et || '';
+            li.appendChild(name);
+            li.appendChild(when);
+            list.appendChild(li);
+          });
+        }
+        document.getElementById('moversLine').textContent = 'Watchlist movers: ' + (data.movers_loaded ? '' : 'none loaded');
+      }
+      function paintJournal(notes){
+        var list = document.getElementById('journalList');
+        list.innerHTML = '';
+        (notes || []).slice(-5).reverse().forEach(function(note){
+          var li = document.createElement('li');
+          var text = document.createElement('span');
+          var when = document.createElement('strong');
+          text.textContent = note.text || '';
+          when.textContent = note.ts ? note.ts.slice(11, 16) : '';
+          li.appendChild(text);
+          li.appendChild(when);
+          list.appendChild(li);
+        });
+      }
+      function loadDeskOps(){
+        paintSession();
+        var tok = deskTok();
+        if (!tok) {
+          paintTrading({});
+          paintAccount({});
+          paintMorning({});
+          return;
+        }
+        var q = '?token=' + encodeURIComponent(tok);
+        fetch('/api/desk/trading' + q).then(function(r){ if(!r.ok) throw new Error(); return r.json(); }).then(paintTrading).catch(function(){ paintTrading({}); });
+        fetch('/api/desk/account' + q).then(function(r){ if(!r.ok) throw new Error(); return r.json(); }).then(paintAccount).catch(function(){ paintAccount({}); });
+        fetch('/api/desk/morning' + q).then(function(r){ if(!r.ok) throw new Error(); return r.json(); }).then(paintMorning).catch(function(){ paintMorning({}); });
+        fetch('/api/journal' + q).then(function(r){ if(!r.ok) throw new Error(); return r.json(); }).then(function(data){ paintJournal(data.notes || []); }).catch(function(){ paintJournal([]); });
+      }
+      var killArmed = false;
+      var killTimer = null;
+      document.getElementById('killBtn').addEventListener('click', function(){
+        var btn = document.getElementById('killBtn');
+        if (!killArmed) {
+          killArmed = true;
+          btn.classList.add('armed');
+          btn.textContent = 'Tap again to halt';
+          if (killTimer) clearTimeout(killTimer);
+          killTimer = setTimeout(function(){
+            killArmed = false;
+            btn.classList.remove('armed');
+            btn.textContent = 'KILL';
+          }, 8000);
+          return;
+        }
+        killArmed = false;
+        if (killTimer) clearTimeout(killTimer);
+        btn.classList.remove('armed');
+        btn.disabled = true;
+        btn.textContent = 'Halting';
+        var tok = deskTok();
+        fetch('/api/desk/kill?token=' + encodeURIComponent(tok), {
+          method: 'POST',
+          headers: {'Content-Type':'application/json'},
+          body: JSON.stringify({confirm:'KILL'})
+        }).then(function(r){ return r.json().then(function(body){ return {ok:r.ok, body:body}; }); }).then(function(res){
+          btn.disabled = false;
+          btn.textContent = 'KILL';
+          var note = document.getElementById('killNote');
+          if (res.ok && res.body && (res.body.written || res.body.already)) {
+            note.textContent = res.body.already ? 'Halt file was already there.' : 'Halt file written. Trading stops. Positions were not closed from this button.';
+            loadDeskOps();
+          } else {
+            note.textContent = (res.body && res.body.error) ? res.body.error : 'KILL was not written.';
+          }
+        }).catch(function(){
+          btn.disabled = false;
+          btn.textContent = 'KILL';
+          document.getElementById('killNote').textContent = 'KILL was not written.';
+        });
+      });
+      document.getElementById('journalSave').addEventListener('click', function(){
+        var box = document.getElementById('journalText');
+        var text = (box.value || '').trim();
+        if (!text) { showToast('Type a note first'); return; }
+        var btn = document.getElementById('journalSave');
+        btn.disabled = true;
+        fetch('/api/journal?token=' + encodeURIComponent(deskTok()), {
+          method: 'POST',
+          headers: {'Content-Type':'application/json'},
+          body: JSON.stringify({text: text})
+        }).then(function(r){ return r.json().then(function(body){ return {ok:r.ok, body:body}; }); }).then(function(res){
+          btn.disabled = false;
+          if (res.ok && res.body && res.body.ok) {
+            box.value = '';
+            showToast('Note saved');
+            loadDeskOps();
+          } else {
+            showToast('Note was not saved');
+          }
+        }).catch(function(){ btn.disabled = false; showToast('Note was not saved'); });
+      });
+      paintSession();
+      setInterval(paintSession, 30000);
+      loadDeskOps();
+
       document.getElementById('homeSearch').addEventListener('input', renderHeadlines);
       document.getElementById('homeSearchForm').addEventListener('submit', function(e){ e.preventDefault(); renderHeadlines(); });
       document.getElementById('homeSpeak').addEventListener('click', function(){
