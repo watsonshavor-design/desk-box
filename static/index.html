@@ -563,7 +563,20 @@
       background:var(--surface); color:var(--ink); font-size:17px; padding:12px 16px;
     }
     .maps-go { width:100%; min-height:56px; font-size:17px; border-radius:16px; }
+    .maps-actions { display:grid; grid-template-columns: 1fr 1fr; gap:10px; }
     .maps-note { color:var(--muted); font-size:14px; line-height:1.5; margin:8px 0 0; }
+    .map-error { color:var(--danger); font-size:13px; font-weight:700; margin:8px 0 0; }
+    .map-frame {
+      width:100%; height:min(62vh, 520px); border:0; border-radius:16px;
+      background:var(--surface-2); margin-top:12px;
+    }
+    #homeMapsCard { min-width:min(92vw, 440px); }
+    .home-maps-form { display:flex; gap:8px; margin-top:8px; }
+    .home-maps-form input {
+      flex:1; min-width:0; min-height:44px; border-radius:999px; border:1px solid var(--line);
+      background:var(--surface-2); color:var(--ink); font:inherit; font-size:14px; padding:0 14px;
+    }
+    #homeMapsCard .map-frame { height:200px; margin-top:8px; }
     .yt-panel h2 { margin:0 0 8px; letter-spacing:-.03em; }
     .yt-connect { width:100%; max-width:420px; min-height:56px; font-size:17px; border-radius:16px; margin-top:16px; }
     .yt-connect:disabled { opacity:.55; cursor:default; }
@@ -657,9 +670,17 @@
             </article>
             <article class="home-info" id="homeMapsCard">
               <p class="home-kicker">Directions</p>
-              <p class="home-big home-desk-label">Maps</p>
-              <p class="home-sub">From 347 S Pinecroft Dr, Taylors, SC 29687</p>
-              <button type="button" class="home-chip" data-go="maps">Open maps</button>
+              <p class="home-sub" id="homeMapsFromLabel">From 347 S Pinecroft Dr, Taylors, SC 29687</p>
+              <form class="home-maps-form" id="homeMapsForm">
+                <input id="homeMapsTo" type="text" autocomplete="street-address" enterkeyhint="go" placeholder="Destination" aria-label="Destination">
+                <button class="home-chip" type="submit">Show</button>
+              </form>
+              <p class="map-error" id="homeMapError" hidden></p>
+              <iframe class="map-frame" id="homeMapFrame" title="Map from home" hidden referrerpolicy="origin"></iframe>
+              <div class="home-meta">
+                <button type="button" class="home-chip" id="homeMapsDir">Directions</button>
+                <button type="button" class="home-chip" data-go="maps">Open maps</button>
+              </div>
             </article>
           </div>
           <div class="home-head"><h2>Top headlines</h2></div>
@@ -839,7 +860,7 @@
         <div class="card maps-panel" style="border-radius:24px;padding:22px;">
           <p class="section-label">MAPS</p>
           <h2 style="margin:0 0 6px;letter-spacing:-.03em;">Directions</h2>
-          <p class="maps-note">Your usual starting address is filled in below. Edit it any time, or enter a destination to get directions. This uses Google Maps. No account and no API key.</p>
+          <p class="maps-note" id="mapsKeyNote">Your usual starting address is filled in. Enter a destination to see the route here.</p>
           <form class="maps-form" id="mapsForm">
             <div>
               <label for="mapsFrom">From</label>
@@ -847,10 +868,15 @@
             </div>
             <div>
               <label for="mapsTo">To</label>
-              <input id="mapsTo" type="text" autocomplete="street-address" enterkeyhint="go" placeholder="Address or destination" required>
+              <input id="mapsTo" type="text" autocomplete="street-address" enterkeyhint="go" placeholder="Address or destination">
             </div>
-            <button class="primary-btn maps-go" id="mapsGo" type="submit">Directions</button>
+            <div class="maps-actions">
+              <button class="primary-btn maps-go" id="mapsGo" type="submit">Show map</button>
+              <button class="ghost-btn maps-go" id="mapsExternal" type="button">Directions</button>
+            </div>
           </form>
+          <p class="map-error" id="mapsMapError" hidden></p>
+          <iframe class="map-frame" id="mapsFrame" title="Google map" hidden referrerpolicy="origin"></iframe>
         </div>
       </section>
 
@@ -1506,16 +1532,104 @@
       var defaultMapsHome = '347 S Pinecroft Dr, Taylors, SC 29687';
       var mapsFrom = document.getElementById('mapsFrom');
       if (mapsFrom && !mapsFrom.value) mapsFrom.value = defaultMapsHome;
+      function setMapError(el, msg){
+        if (!el) return;
+        if (msg) { el.hidden = false; el.textContent = msg; }
+        else { el.hidden = true; el.textContent = ''; }
+      }
+      function mapsPlaces(){
+        var from = ((document.getElementById('mapsFrom') || {}).value || '').trim() || defaultMapsHome;
+        var to = ((document.getElementById('mapsTo') || {}).value || '').trim();
+        return {from: from, to: to};
+      }
+      function openMapsDirections(from, to){
+        var dest = (to || '').trim();
+        var origin = (from || '').trim();
+        if (!dest && origin) { dest = origin; origin = ''; }
+        if (!dest) { showToast('Enter an address'); return; }
+        var url = 'https://www.google.com/maps/dir/?api=1&destination=' + encodeURIComponent(dest);
+        if (origin) url += '&origin=' + encodeURIComponent(origin);
+        window.open(url, '_blank', 'noopener');
+      }
+      function loadMapFrame(frame, origin, destination, compact){
+        if (!frame) return;
+        var tok = deskToken();
+        if (!tok) { frame.hidden = true; return; }
+        var params = new URLSearchParams();
+        params.set('token', tok);
+        params.set('origin', origin || defaultMapsHome);
+        params.set('destination', destination || '');
+        if (compact) params.set('compact', '1');
+        frame.hidden = false;
+        frame.src = '/api/maps/frame?' + params.toString();
+      }
+      function showDeskMaps(origin, destination){
+        var label = document.getElementById('homeMapsFromLabel');
+        if (label) label.textContent = 'From ' + (origin || defaultMapsHome);
+        setMapError(document.getElementById('homeMapError'), '');
+        setMapError(document.getElementById('mapsMapError'), '');
+        loadMapFrame(document.getElementById('homeMapFrame'), origin, destination, true);
+        loadMapFrame(document.getElementById('mapsFrame'), origin, destination, false);
+      }
+      window.addEventListener('message', function(ev){
+        if (ev.origin !== location.origin) return;
+        var data = ev.data || {};
+        if (data.source !== 'desk-map') return;
+        var homeFrame = document.getElementById('homeMapFrame');
+        var mapsFrame = document.getElementById('mapsFrame');
+        var err = null;
+        if (homeFrame && ev.source === homeFrame.contentWindow) err = document.getElementById('homeMapError');
+        else if (mapsFrame && ev.source === mapsFrame.contentWindow) err = document.getElementById('mapsMapError');
+        if (!err) return;
+        if (data.ok) setMapError(err, '');
+        else setMapError(err, data.error || 'Could not show that map.');
+      });
       document.getElementById('mapsForm').addEventListener('submit', function(e){
         e.preventDefault();
-        var to = (document.getElementById('mapsTo').value || '').trim();
-        var from = (document.getElementById('mapsFrom').value || '').trim();
-        if (!to && from) { to = from; from = ''; }
-        if (!to) { showToast('Enter an address'); return; }
-        var url = 'https://www.google.com/maps/dir/?api=1&destination=' + encodeURIComponent(to);
-        if (from) url += '&origin=' + encodeURIComponent(from);
-        window.open(url, '_blank', 'noopener');
+        var places = mapsPlaces();
+        var homeTo = document.getElementById('homeMapsTo');
+        if (homeTo) homeTo.value = places.to;
+        showDeskMaps(places.from, places.to);
       });
+      document.getElementById('mapsExternal').addEventListener('click', function(){
+        var places = mapsPlaces();
+        openMapsDirections(places.from, places.to);
+      });
+      document.getElementById('homeMapsForm').addEventListener('submit', function(e){
+        e.preventDefault();
+        var to = (document.getElementById('homeMapsTo').value || '').trim();
+        var mapsTo = document.getElementById('mapsTo');
+        if (mapsTo) mapsTo.value = to;
+        var from = ((document.getElementById('mapsFrom') || {}).value || '').trim() || defaultMapsHome;
+        showDeskMaps(from, to);
+      });
+      document.getElementById('homeMapsDir').addEventListener('click', function(){
+        var to = (document.getElementById('homeMapsTo').value || '').trim();
+        var from = ((document.getElementById('mapsFrom') || {}).value || '').trim() || defaultMapsHome;
+        openMapsDirections(from, to);
+      });
+      (function bootMaps(){
+        var note = document.getElementById('mapsKeyNote');
+        var tok = deskToken();
+        if (!tok) {
+          if (note) note.textContent = 'Open the desk with your room token to load the map. Directions still opens Google Maps.';
+          return;
+        }
+        fetch('/api/maps/status?token=' + encodeURIComponent(tok)).then(function(r){
+          if (!r.ok) throw new Error('maps');
+          return r.json();
+        }).then(function(data){
+          if (!data || !data.configured) {
+            if (note) note.textContent = 'The Google Maps key is not set on the server yet. Directions still opens Google Maps.';
+            setMapError(document.getElementById('homeMapError'), 'Map key is not set on the server yet.');
+            return;
+          }
+          if (note) note.textContent = 'The map starts at your home address. Enter a destination to see the route. Directions opens Google Maps.';
+          showDeskMaps(defaultMapsHome, '');
+        }).catch(function(){
+          if (note) note.textContent = 'The map could not be checked. Directions still opens Google Maps.';
+        });
+      })();
       document.getElementById('youtubeConnect').addEventListener('click', function(){
         var btn = document.getElementById('youtubeConnect');
         if (btn.disabled) return;

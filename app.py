@@ -34,7 +34,8 @@ from urllib.parse import urlencode
 from datetime import datetime, timedelta, timezone
 
 from fastapi import FastAPI, File, Request, UploadFile, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
+from html import escape
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from providers import PROVIDERS
@@ -1712,6 +1713,205 @@ async def youtube_callback(code: str = "", state: str = "", error: str = ""):
         return RedirectResponse("/?yt=error#youtube", status_code=302)
     log.info("youtube oauth connected")
     return RedirectResponse("/?yt=connected#youtube", status_code=302)
+
+
+DEFAULT_MAPS_ORIGIN = "347 S Pinecroft Dr, Taylors, SC 29687"
+_MAP_QUERY_LIMIT = 240
+
+
+def _maps_api_key():
+    """Server env only. Never log this value."""
+    return (os.environ.get("GOOGLE_MAPS_API_KEY") or "").strip()
+
+
+def _clean_map_text(value):
+    if not isinstance(value, str):
+        return ""
+    return " ".join(value.split())[:_MAP_QUERY_LIMIT]
+
+
+_MAP_FRAME = """<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="origin">
+<title>Map</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #ece6f5; color: #21172d; font: 15px/1.45 sans-serif; }
+  #map { height: 100%; width: 100%; }
+  #wait, #err { margin: 0; padding: 16px 18px; }
+  #err { color: #b64855; font-weight: 700; }
+  #note { margin: 0; padding: 0 18px 12px; color: #6d6179; font-size: 13px; }
+</style>
+</head>
+<body>
+<p id="wait">Finding that place…</p>
+<p id="err" hidden></p>
+<p id="note" hidden></p>
+<div id="map" hidden></div>
+<script>window.__DESK_MAP = __MAP_CFG__;</script>
+<script>
+(function(){
+  var cfg = window.__DESK_MAP || {};
+  var waitEl = document.getElementById('wait');
+  var errEl = document.getElementById('err');
+  var noteEl = document.getElementById('note');
+  var mapEl = document.getElementById('map');
+  function tell(ok, error){
+    try {
+      parent.postMessage({source: 'desk-map', ok: !!ok, error: error || ''}, location.origin);
+    } catch (e) {}
+  }
+  function fail(msg){
+    window.__deskMapStarted = true;
+    waitEl.hidden = true;
+    mapEl.hidden = true;
+    noteEl.hidden = true;
+    errEl.hidden = false;
+    errEl.textContent = msg;
+    tell(false, msg);
+  }
+  window.gm_authFailure = function(){
+    fail('Google Maps refused this site.');
+  };
+  setTimeout(function(){
+    if (!window.__deskMapStarted) fail('Google Maps did not load.');
+  }, 15000);
+  function geocode(geocoder, address){
+    return new Promise(function(resolve){
+      geocoder.geocode({address: address}, function(results, status){
+        if (status === 'OK' && results && results[0] && results[0].geometry && results[0].geometry.location) {
+          var loc = results[0].geometry.location;
+          var lat = loc.lat();
+          var lng = loc.lng();
+          if (typeof lat === 'number' && typeof lng === 'number' && isFinite(lat) && isFinite(lng)) {
+            resolve({ok: true, ll: loc, formatted: results[0].formatted_address || ''});
+            return;
+          }
+        }
+        resolve({ok: false, status: status || 'UNKNOWN'});
+      });
+    });
+  }
+  function geoError(which, status){
+    if (status === 'REQUEST_DENIED') return 'Google Maps refused to look up that ' + which + '.';
+    return 'Could not find that ' + which + '.';
+  }
+  window.deskInitMap = function(){
+    window.__deskMapStarted = true;
+    var geocoder = new google.maps.Geocoder();
+    geocode(geocoder, cfg.origin).then(function(origin){
+      if (!origin.ok) {
+        fail(geoError('start address', origin.status));
+        return null;
+      }
+      if (!cfg.destination) return {origin: origin, dest: null};
+      return geocode(geocoder, cfg.destination).then(function(dest){
+        if (!dest.ok) {
+          fail(geoError('destination', dest.status));
+          return null;
+        }
+        return {origin: origin, dest: dest};
+      });
+    }).then(function(places){
+      if (!places) return;
+      waitEl.hidden = true;
+      mapEl.hidden = false;
+      var center = places.dest ? places.dest.ll : places.origin.ll;
+      var map = new google.maps.Map(mapEl, {
+        center: center,
+        zoom: places.dest ? 12 : 16,
+        mapTypeControl: false,
+        streetViewControl: false,
+        fullscreenControl: !cfg.compact,
+        gestureHandling: 'greedy'
+      });
+      if (!places.dest) {
+        new google.maps.Marker({map: map, position: places.origin.ll, title: places.origin.formatted || cfg.origin});
+        tell(true, '');
+        return;
+      }
+      var renderer = new google.maps.DirectionsRenderer({map: map, suppressMarkers: false});
+      new google.maps.DirectionsService().route({
+        origin: places.origin.ll,
+        destination: places.dest.ll,
+        travelMode: google.maps.TravelMode.DRIVING
+      }, function(result, status){
+        if (status === 'OK' && result) {
+          renderer.setDirections(result);
+          tell(true, '');
+          return;
+        }
+        new google.maps.Marker({map: map, position: places.origin.ll, title: places.origin.formatted || cfg.origin});
+        new google.maps.Marker({map: map, position: places.dest.ll, title: places.dest.formatted || cfg.destination});
+        var bounds = new google.maps.LatLngBounds();
+        bounds.extend(places.origin.ll);
+        bounds.extend(places.dest.ll);
+        map.fitBounds(bounds);
+        noteEl.hidden = false;
+        noteEl.textContent = 'No driving route. Showing the two places.';
+        tell(true, '');
+      });
+    }).catch(function(){
+      fail('The map could not be drawn.');
+    });
+  };
+})();
+</script>
+<script async defer src="https://maps.googleapis.com/maps/api/js?key=__MAP_KEY__&amp;callback=deskInitMap&amp;v=weekly&amp;loading=async"></script>
+</body>
+</html>
+"""
+
+
+def _maps_frame_document(origin, destination, compact):
+    key = _maps_api_key()
+    cfg = json.dumps(
+        {"origin": origin, "destination": destination, "compact": bool(compact)},
+        ensure_ascii=True,
+    ).replace("<", "\\u003c")
+    return (
+        _MAP_FRAME
+        .replace("__MAP_CFG__", cfg)
+        .replace("__MAP_KEY__", escape(key, quote=True))
+    )
+
+
+@app.get("/api/maps/status")
+async def maps_status(token: str = ""):
+    if not _token_match(token):
+        return JSONResponse({"error": "bad token"}, status_code=403)
+    return JSONResponse({"configured": bool(_maps_api_key())})
+
+
+@app.get("/api/maps/frame")
+async def maps_frame(token: str = "", origin: str = "", destination: str = "", compact: str = ""):
+    """Token-gated map page. The Maps JavaScript key is injected here only.
+
+    Geocoding REST is unusable with this referrer-locked key, so the frame
+    geocodes in the browser and refuses to draw a pin when lookup fails.
+    """
+    if not _token_match(token):
+        return JSONResponse({"error": "bad token"}, status_code=403)
+    headers = {
+        "Cache-Control": "no-store",
+        "Referrer-Policy": "origin",
+        "X-Content-Type-Options": "nosniff",
+    }
+    if not _maps_api_key():
+        page = (
+            "<!doctype html><html><head><meta charset='utf-8'>"
+            "<meta name='referrer' content='origin'></head><body>"
+            "<p style='font:15px sans-serif;padding:16px;color:#b64855'>"
+            "Google Maps key is not set on the server."
+            "</p></body></html>"
+        )
+        return HTMLResponse(page, headers=headers)
+    start = _clean_map_text(origin) or DEFAULT_MAPS_ORIGIN
+    dest = _clean_map_text(destination)
+    page = _maps_frame_document(start, dest, compact in {"1", "true", "yes"})
+    return HTMLResponse(page, headers=headers)
 
 
 @app.get("/api/gainers")

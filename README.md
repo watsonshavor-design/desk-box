@@ -49,7 +49,7 @@ long-lived process.
 
 ## Security
 
-- API keys live **only** in server env vars. The browser never sees them.
+- API keys live in server env vars and are not committed. Chat and YouTube keys stay on the server. The Maps JavaScript key is injected only into the token-gated map frame, because that API requires it in the browser. Restrict that key to the desk origin.
 - The `?token=` gate keeps the room private. Rotate `DESK_TOKEN` any time.
 - One cross-talk round max per message; providers run in parallel with a
   120s timeout; one provider failing never blocks the other.
