@@ -3037,7 +3037,10 @@ async def ace_reply(request: Request):
     return JSONResponse({"ok": True})
 
 
-# Seats named on a CoS post. They have no login and no post path.
+# Crew seats. No room login. A CoS post may name them with "seats"
+# (a line on the CoS bubble). Each can also post as itself:
+# POST /api/scout-reply, /api/muse-reply, /api/finance-reply
+# with the same DESK_TOKEN as CoS. No webhook, timer, or listener.
 _CONTRIBUTOR_LABELS = {
     "scout": "Scout",
     "muse": "Muse Ops",
@@ -3070,9 +3073,10 @@ def parse_contributors(raw):
 # Chief of Staff (CoS) posts into the room the same way Ace does.
 # POST /api/cos-reply {"token": ..., "text": ..., "discuss"?: bool,
 #                      "seats"?: ["scout","muse","finance"]}
-#   from=cos, broadcast provider=cos. Optional seats names who contributed.
-#   Those seats cannot post. discuss=true queues one Rail/Anchor fan-out
-#   round framed as from CoS (never re-enters the queue).
+#   from=cos, broadcast provider=cos. Optional seats names who contributed
+#   on this CoS bubble. A seat's own bubble is /api/<seat>-reply, not this
+#   list. discuss=true queues one Rail/Anchor fan-out round framed as from
+#   CoS (never re-enters the queue).
 @app.post("/api/cos-reply")
 async def cos_reply(request: Request):
     try:
@@ -3109,6 +3113,59 @@ async def cos_reply(request: Request):
                              "image": image, "funnel": False,
                              "for_ts": entry["ts"]})
     return JSONResponse({"ok": True})
+
+
+# Scout, Muse Ops, and Finance Tracker post as themselves.
+# Same auth and body shape as /api/cos-reply, minus the seats list.
+# Stored from= and broadcast provider= are the short ids scout|muse|finance.
+async def _seat_reply(request: Request, speaker: str):
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "bad body"}, status_code=400)
+    if body.get("token") != DESK_TOKEN:
+        return JSONResponse({"error": "bad token"}, status_code=403)
+    if speaker not in _CONTRIBUTOR_LABELS:
+        return JSONResponse({"error": "unknown speaker"}, status_code=400)
+    text = str(body.get("text", "")).strip()[:4000]
+    if not text:
+        return JSONResponse({"error": "empty"}, status_code=400)
+    entry = {"from": speaker, "text": text, "ts": now_iso()}
+    attachment, image, kind = resolve_attachment(body.get("attachment"))
+    if attachment:
+        entry["attachment"] = attachment
+    await remember(entry)
+    bcast = {"type": "reply", "provider": speaker,
+             "round": 1, "text": text, "ts": entry["ts"]}
+    if attachment:
+        bcast["attachment"] = attachment
+    await room.broadcast(bcast)
+    if body.get("discuss") is True:
+        label = _CONTRIBUTOR_LABELS[speaker]
+        framed = (f"[From {label}, posting in the desk room as themselves — "
+                  "respond as a peer, not as Shavor. Direct and plain.]\n\n"
+                  + text)
+        if kind == "video":
+            framed += f"\n\n[{label} shared a video.]"
+        await msg_queue.put({"text": framed, "crosstalk": False,
+                             "image": image, "funnel": False,
+                             "for_ts": entry["ts"]})
+    return JSONResponse({"ok": True, "from": speaker})
+
+
+@app.post("/api/scout-reply")
+async def scout_reply(request: Request):
+    return await _seat_reply(request, "scout")
+
+
+@app.post("/api/muse-reply")
+async def muse_reply(request: Request):
+    return await _seat_reply(request, "muse")
+
+
+@app.post("/api/finance-reply")
+async def finance_reply(request: Request):
+    return await _seat_reply(request, "finance")
 
 
 @app.post("/api/archive-feed")

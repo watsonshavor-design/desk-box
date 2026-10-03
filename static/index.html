@@ -607,13 +607,24 @@
     .task-marker.warn { background:var(--warm); }
     #log .msg { max-width:92%; padding:10px 12px; border-radius:16px; line-height:1.45; font-size:14px; }
     #log .msg.me { margin-left:auto; background:var(--accent-soft); }
-    #log .msg.grok, #log .msg.gemini, #log .msg.ace, #log .msg.cos { background:var(--surface-2); border:1px solid var(--line); }
+    #log .msg.grok, #log .msg.gemini, #log .msg.ace, #log .msg.cos,
+    #log .msg.scout, #log .msg.muse, #log .msg.finance { background:var(--surface-2); border:1px solid var(--line); }
+    #log .msg.scout { border-left:3px solid var(--warm); }
+    #log .msg.muse { border-left:3px solid #2f8f78; }
+    #log .msg.finance { border-left:3px solid var(--blue); }
     #log .who { display:flex; align-items:center; flex-wrap:wrap; gap:6px 8px; font-size:11px; font-weight:700; letter-spacing:.06em; margin-bottom:4px; }
     #log .who img.av { width:18px; height:18px; border-radius:50%; flex:0 0 auto; }
     #log .who-name { font-weight:700; letter-spacing:.06em; }
     #log .who.grok { color:var(--warm); }
     #log .who.gemini { color:var(--blue); }
     #log .who.me, #log .who.ace, #log .who.cos { color:var(--accent-strong); }
+    #log .who.scout { color:var(--warm); }
+    #log .who.muse { color:#0f766e; }
+    #log .who.finance { color:var(--blue); }
+    @media (prefers-color-scheme: dark) {
+      #log .who.muse { color:#7dcec0; }
+      #log .msg.muse { border-left-color:#7dcec0; }
+    }
     #log .round { display:inline-block; font-size:10px; color:var(--muted); font-weight:400; letter-spacing:0; padding:2px 7px; border-radius:999px; background:var(--surface-3); }
     #log .ts { font-size:10px; color:var(--muted); font-weight:400; letter-spacing:0; }
     #status.on { color:var(--accent-strong); }
@@ -2494,6 +2505,9 @@ const NAMES = {
   gemini: ["ANCHOR", "/static/avatar-anchor.png"],
   ace:    ["ACE",    "/static/icon-192.png"],
   cos:    ["CHIEF OF STAFF", "/static/icon-192.png"],
+  scout:  ["Scout", "/static/icon-192.png"],
+  muse:   ["Muse Ops", "/static/icon-192.png"],
+  finance:["Finance Tracker", "/static/icon-192.png"],
   me:     ["SHAVOR", null]
 };
 const SEAT_LABELS = {scout:"Scout", muse:"Muse Ops", finance:"Finance Tracker"};
@@ -2549,6 +2563,9 @@ const VOICE_STYLE = {
   gemini: {pitch:1.05, rate:1.0},   // Anchor — even
   ace:    {pitch:1.2,  rate:1.03},  // Ace — a touch brighter
   cos:    {pitch:0.9,  rate:1.0},   // CoS — calm desk lead
+  scout:  {pitch:1.05, rate:1.02},  // Scout
+  muse:   {pitch:0.98, rate:0.98},  // Muse Ops
+  finance:{pitch:0.82, rate:1.0},   // Finance Tracker
 };
 let voicePool = [];
 function initVoices(){
@@ -2576,7 +2593,7 @@ function speak(who, text){
     const u = new SpeechSynthesisUtterance(text);
     const style = VOICE_STYLE[who] || {pitch:1, rate:1};
     // Spread distinct English voices across the three personas when available.
-    const idx = {grok:0, gemini:1, ace:2, cos:3}[who];
+    const idx = {grok:0, gemini:1, ace:2, cos:3, scout:4, muse:5, finance:6}[who];
     if (voicePool.length && idx !== undefined)
       u.voice = voicePool[idx % voicePool.length];
     u.pitch = style.pitch; u.rate = style.rate;
@@ -2754,7 +2771,7 @@ function setThinking(provider, state){
   let el = document.getElementById(id);
   if(state==="thinking" || state==="reacting"){
     if(!el){ el = document.createElement("div"); el.id=id; el.className="thinking"; log.appendChild(el); }
-    el.textContent = (provider==="grok"?"Rail":provider==="gemini"?"Anchor":provider==="cos"?"Chief of Staff":"Ace") +
+    el.textContent = (provider==="grok"?"Rail":provider==="gemini"?"Anchor":provider==="cos"?"Chief of Staff":provider==="scout"?"Scout":provider==="muse"?"Muse Ops":provider==="finance"?"Finance Tracker":"Ace") +
       (state==="reacting" ? " is reacting…" : " is thinking…");
     log.scrollTop = log.scrollHeight;
   } else if(el){ el.remove(); }
