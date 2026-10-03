@@ -934,8 +934,180 @@ def _queue_open_count(root):
     return count
 
 
+def _atomic_json(path, payload):
+    parent = os.path.dirname(path)
+    os.makedirs(parent, exist_ok=True)
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as handle:
+        json.dump(payload, handle, ensure_ascii=False)
+        handle.write("\n")
+    os.replace(tmp, path)
+
+
+def _parse_utc(value):
+    if not isinstance(value, str) or not value.strip():
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _enum(value, allowed, default="unknown"):
+    if isinstance(value, str):
+        value = value.strip().lower()
+        if value in allowed:
+            return value
+    return default
+
+
+DESK_STATUS_PATH = os.path.join(DATA_DIR, "desk-trading-status.json")
+DESK_KILL_REQUEST_PATH = os.path.join(DATA_DIR, "desk-kill-request.json")
+_DAEMON_STATES = {"alive", "dead", "unknown"}
+_OPEND_STATES = {"connected", "down", "unknown"}
+_UNLOCK_STATES = {"yes", "no", "unknown"}
+_KILL_STATES = {"present", "absent", "unknown"}
+
+
+def _blank_trading_status():
+    return {
+        "reachable": False,
+        "daemon": "unknown",
+        "daemon_as_of": None,
+        "opend": "unknown",
+        "trade_unlocked": "unknown",
+        "open_orders": None,
+        "open_orders_label": "unknown",
+        "kill_file": "unknown",
+        "kill_requested": False,
+    }
+
+
+def _kill_request_state():
+    data = _read_json_file(DESK_KILL_REQUEST_PATH)
+    if not isinstance(data, dict):
+        return {}
+    return data
+
+
+def kill_request_pending():
+    data = _kill_request_state()
+    if data.get("pending") is True and data.get("acked") is not True:
+        rid = data.get("request_id")
+        if isinstance(rid, str) and rid:
+            return {
+                "pending": True,
+                "request_id": rid,
+                "requested_at": data.get("requested_at") if isinstance(data.get("requested_at"), str) else None,
+            }
+    return {"pending": False}
+
+
+def record_kill_request():
+    """Remember a second-tap halt. Does not touch positions or the broker."""
+    current = kill_request_pending()
+    if current.get("pending"):
+        return {
+            "ok": True,
+            "written": False,
+            "requested": True,
+            "already": True,
+            "request_id": current["request_id"],
+        }
+    payload = {
+        "pending": True,
+        "acked": False,
+        "request_id": uuid.uuid4().hex,
+        "requested_at": datetime.now(timezone.utc).isoformat(),
+    }
+    try:
+        _atomic_json(DESK_KILL_REQUEST_PATH, payload)
+    except OSError:
+        return {"ok": False, "error": "could not record kill request", "written": False, "requested": False}
+    return {
+        "ok": True,
+        "written": False,
+        "requested": True,
+        "already": False,
+        "request_id": payload["request_id"],
+    }
+
+
+def ack_kill_request(request_id):
+    if not isinstance(request_id, str) or not request_id.strip():
+        return {"ok": False, "error": "request_id required"}
+    request_id = request_id.strip()
+    data = _kill_request_state()
+    if data.get("request_id") != request_id or data.get("pending") is not True:
+        return {"ok": False, "error": "no matching request"}
+    data["pending"] = False
+    data["acked"] = True
+    data["acked_at"] = datetime.now(timezone.utc).isoformat()
+    try:
+        _atomic_json(DESK_KILL_REQUEST_PATH, data)
+    except OSError:
+        return {"ok": False, "error": "could not ack kill request"}
+    return {"ok": True, "request_id": request_id}
+
+
+def normalize_trading_push(body):
+    """Keep only status facts. Drop equity, P/L, and any token field."""
+    if not isinstance(body, dict):
+        return None
+    open_orders = body.get("open_orders")
+    if isinstance(open_orders, bool) or not isinstance(open_orders, int) or open_orders < 0:
+        open_orders = None
+    as_of = body.get("daemon_as_of")
+    if not isinstance(as_of, str) or len(as_of) > 80:
+        as_of = None
+    source = body.get("open_orders_source")
+    if open_orders is None or not isinstance(source, str) or source.strip() != "desk queue":
+        source = None
+    return {
+        "reachable": True,
+        "daemon": _enum(body.get("daemon"), _DAEMON_STATES),
+        "daemon_as_of": as_of,
+        "opend": _enum(body.get("opend"), _OPEND_STATES),
+        "trade_unlocked": _enum(body.get("trade_unlocked"), _UNLOCK_STATES),
+        "open_orders": open_orders,
+        "open_orders_label": "unknown" if open_orders is None else str(open_orders),
+        "open_orders_source": source,
+        "kill_file": _enum(body.get("kill_file"), _KILL_STATES),
+        "pushed_at": datetime.now(timezone.utc).isoformat(),
+        "source": "desk-exec",
+    }
+
+
+def store_trading_push(payload):
+    _atomic_json(DESK_STATUS_PATH, payload)
+
+
+def _pushed_trading_status():
+    data = _read_json_file(DESK_STATUS_PATH)
+    if not data:
+        return None
+    pushed = _parse_utc(data.get("pushed_at"))
+    if pushed is None:
+        return None
+    age = (datetime.now(timezone.utc) - pushed).total_seconds()
+    if age < 0 or age > DESK_STATUS_STALE_SEC:
+        return None
+    clean = normalize_trading_push(data)
+    if clean is None:
+        return None
+    clean["pushed_at"] = data.get("pushed_at")
+    clean["source"] = "desk-exec"
+    return clean
+
+
 def desk_trading_status():
-    """Facts from local desk-exec files only. Never invents a live book."""
+    """Local desk files when this server has them, otherwise the last fresh push.
+
+    Never invents equity or P/L. A stale or missing push stays unknown.
+    """
     state = _desk_state_dir()
     unknown = {
         "reachable": False,
@@ -985,7 +1157,7 @@ def desk_trading_status():
     else:
         unlocked = "unknown"
     open_count = _queue_open_count(root)
-    return {
+    status = {
         "reachable": True,
         "daemon": daemon,
         "daemon_as_of": as_of,
@@ -995,7 +1167,27 @@ def desk_trading_status():
         "open_orders_label": "unknown" if open_count is None else str(open_count),
         "open_orders_source": None if open_count is None else "desk queue",
         "kill_file": "present" if kill_present else "absent",
+        "source": "local",
     }
+    return _with_kill_request(status)
+
+
+def _with_kill_request(status):
+    out = _blank_trading_status()
+    if isinstance(status, dict):
+        out.update(status)
+    out["kill_requested"] = bool(kill_request_pending().get("pending"))
+    return out
+
+
+def desk_trading_status_public():
+    state = _desk_state_dir()
+    if state is not None:
+        return desk_trading_status()
+    pushed = _pushed_trading_status()
+    if pushed is None:
+        return _with_kill_request(_blank_trading_status())
+    return _with_kill_request(pushed)
 
 
 def desk_account_snapshot():
@@ -1106,7 +1298,7 @@ async def desk(token: str = ""):
 async def desk_trading(token: str = ""):
     if not _token_match(token):
         return JSONResponse({"error": "bad token"}, status_code=403)
-    return JSONResponse(desk_trading_status())
+    return JSONResponse(desk_trading_status_public())
 
 
 @app.get("/api/desk/account")
@@ -1147,6 +1339,67 @@ async def desk_kill(request: Request, token: str = ""):
     if not isinstance(body, dict) or body.get("confirm") != "KILL":
         return JSONResponse({"ok": False, "error": "confirm required"}, status_code=400)
     result = write_kill_file()
+    if (
+        not result.get("ok")
+        and result.get("error") == "desk state is not on this server"
+    ):
+        # Railway cannot see the desk tree. Record the request; the local
+        # watcher creates state/KILL. Still no orders and no liquidation.
+        result = record_kill_request()
+    status = 200 if result.get("ok") else 409
+    return JSONResponse(result, status_code=status)
+
+
+def _desk_token_from(request, body=None):
+    if isinstance(body, dict) and _token_match(body.get("token") or ""):
+        return True
+    return _token_match(request.query_params.get("token") or "")
+
+
+@app.post("/api/desk/trading/ingest")
+async def desk_trading_ingest(request: Request):
+    """Local desk pushes heartbeat facts. Token in JSON or query, never logged."""
+    try:
+        body = await request.json()
+    except Exception:
+        body = None
+    if not isinstance(body, dict) or not _desk_token_from(request, body):
+        return JSONResponse({"error": "bad token"}, status_code=403)
+    payload = normalize_trading_push(body)
+    if payload is None:
+        return JSONResponse({"error": "bad payload"}, status_code=400)
+    try:
+        store_trading_push(payload)
+    except OSError:
+        return JSONResponse({"ok": False, "error": "could not store"}, status_code=500)
+    public = desk_trading_status_public()
+    return JSONResponse({
+        "ok": True,
+        "daemon": public.get("daemon"),
+        "opend": public.get("opend"),
+        "trade_unlocked": public.get("trade_unlocked"),
+        "open_orders": public.get("open_orders"),
+        "kill_file": public.get("kill_file"),
+        "reachable": public.get("reachable"),
+    })
+
+
+@app.get("/api/desk/kill/pending")
+async def desk_kill_pending(token: str = ""):
+    if not _token_match(token):
+        return JSONResponse({"error": "bad token"}, status_code=403)
+    return JSONResponse(kill_request_pending())
+
+
+@app.post("/api/desk/kill/ack")
+async def desk_kill_ack(request: Request):
+    try:
+        body = await request.json()
+    except Exception:
+        body = None
+    if not isinstance(body, dict) or not _desk_token_from(request, body):
+        return JSONResponse({"error": "bad token"}, status_code=403)
+    result = ack_kill_request(body.get("request_id"))
     status = 200 if result.get("ok") else 409
     return JSONResponse(result, status_code=status)
 

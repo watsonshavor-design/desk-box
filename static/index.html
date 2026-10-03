@@ -1620,6 +1620,10 @@
           killNote.textContent = 'Desk state is not on this server. KILL was not written.';
         } else if (data.kill_file === 'present') {
           killNote.textContent = 'Halt file is already there. Trading stays stopped until that file is removed.';
+        } else if (data.kill_requested) {
+          killNote.textContent = 'Halt requested. Waiting for the desk to write the file. Positions were not closed.';
+        } else {
+          killNote.textContent = 'Second tap writes the desk halt. It does not close positions.';
         }
       }
       function paintAccount(data){
@@ -1713,8 +1717,12 @@
           btn.disabled = false;
           btn.textContent = 'KILL';
           var note = document.getElementById('killNote');
-          if (res.ok && res.body && (res.body.written || res.body.already)) {
-            note.textContent = res.body.already ? 'Halt file was already there.' : 'Halt file written. Trading stops. Positions were not closed from this button.';
+          if (res.ok && res.body && (res.body.written || res.body.already || res.body.requested)) {
+            if (res.body.requested && !res.body.written) {
+              note.textContent = 'Halt requested. The desk will write the halt file. Positions were not closed.';
+            } else {
+              note.textContent = res.body.already ? 'Halt file was already there.' : 'Halt file written. Trading stops. Positions were not closed from this button.';
+            }
             loadDeskOps();
           } else {
             note.textContent = (res.body && res.body.error) ? res.body.error : 'KILL was not written.';
