@@ -656,6 +656,226 @@
     .family-panel p { margin:0 0 12px; color:var(--muted); font-size:15px; line-height:1.55; }
     .home-quiet { margin:8px 0 0; color:var(--muted); font-size:13px; font-weight:650; }
 
+    /* Spatial desk treatment: depth and glass, without changing any app behavior. */
+    .main {
+      perspective: 1500px;
+      perspective-origin: 50% 18%;
+    }
+
+    .rail,
+    .topbar,
+    .card,
+    .home-info,
+    .quick-card,
+    .task-column,
+    .task-tile,
+    .protocol-card,
+    .family-panel,
+    .movers-card,
+    .integration-card,
+    .source-panel,
+    .bluetooth-panel,
+    .chat-panel,
+    .home-search,
+    .home-chip,
+    .brief-tab,
+    .source-tab,
+    .list-tab,
+    .drawer,
+    .mobile-nav {
+      background: color-mix(in srgb, var(--surface) 72%, transparent);
+      border-color: color-mix(in srgb, var(--line) 78%, rgba(255,255,255,.28));
+      box-shadow:
+        0 1px 0 rgba(255,255,255,.14) inset,
+        0 18px 38px rgba(3, 8, 18, .16),
+        0 3px 10px rgba(3, 8, 18, .10);
+      backdrop-filter: blur(18px) saturate(125%);
+      -webkit-backdrop-filter: blur(18px) saturate(125%);
+    }
+
+    .rail {
+      background: color-mix(in srgb, var(--surface) 78%, transparent);
+      box-shadow: 10px 0 34px rgba(3, 8, 18, .12), 1px 0 0 rgba(255,255,255,.10) inset;
+    }
+
+    .topbar { border-radius: 22px; padding: 12px 14px; }
+
+    .card,
+    .home-info,
+    .quick-card,
+    .task-column,
+    .task-tile,
+    .protocol-card,
+    .family-panel,
+    .movers-card,
+    .integration-card,
+    .source-panel,
+    .bluetooth-panel,
+    .chat-panel {
+      position: relative;
+      overflow: hidden;
+      transform-style: preserve-3d;
+      isolation: isolate;
+    }
+
+    .card::before,
+    .home-info::before,
+    .quick-card::before,
+    .task-column::before,
+    .task-tile::before,
+    .protocol-card::before,
+    .family-panel::before,
+    .movers-card::before,
+    .integration-card::before,
+    .source-panel::before,
+    .bluetooth-panel::before,
+    .chat-panel::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      z-index: -1;
+      background:
+        linear-gradient(135deg, rgba(255,255,255,.14), transparent 32%),
+        radial-gradient(circle at 88% 4%, color-mix(in srgb, var(--accent) 12%, transparent), transparent 34%);
+      opacity: .9;
+    }
+
+    .lead-card,
+    .chat-panel,
+    .movers-card,
+    .protocol-card,
+    .home-info,
+    .quick-card,
+    .task-tile {
+      box-shadow:
+        0 1px 0 rgba(255,255,255,.18) inset,
+        0 24px 48px rgba(3, 8, 18, .20),
+        0 5px 14px rgba(3, 8, 18, .13);
+    }
+
+    .lead-card > *,
+    .chat-panel > *,
+    .movers-card > *,
+    .protocol-card > *,
+    .home-info > *,
+    .quick-card > *,
+    .task-tile > * { transform: translateZ(12px); }
+
+    .home-info { transform: translateZ(0); }
+
+    .home-info:nth-child(2n),
+    .quick-card:nth-child(2n),
+    .task-tile:nth-child(2n) { --spatial-yaw: 1deg; }
+    .home-info:nth-child(2n+1),
+    .quick-card:nth-child(2n+1),
+    .task-tile:nth-child(2n+1) { --spatial-yaw: -1deg; }
+
+    .home-chip,
+    .app-launcher,
+    .task-row,
+    .datum,
+    .take,
+    .insight,
+    .news-item,
+    .source-row,
+    .watch-snapshot,
+    .yt-card,
+    .leave-by,
+    .mode-card,
+    .compose-box,
+    .home-search-btn,
+    .icon-btn,
+    .proto-badge {
+      background: color-mix(in srgb, var(--surface-2) 76%, transparent);
+      border-color: color-mix(in srgb, var(--line) 72%, transparent);
+      box-shadow: 0 1px 0 rgba(255,255,255,.12) inset, 0 8px 18px rgba(3, 8, 18, .10);
+    }
+
+    .primary-btn,
+    .tap-48,
+    .read-aloud,
+    .source-tab.active,
+    .home-head h2 {
+      box-shadow: 0 1px 0 rgba(255,255,255,.24) inset, 0 8px 18px color-mix(in srgb, var(--accent) 28%, transparent);
+    }
+
+    @media (hover: hover) and (prefers-reduced-motion: no-preference) {
+      .card,
+      .home-info,
+      .quick-card,
+      .task-column,
+      .task-tile,
+      .protocol-card,
+      .family-panel,
+      .movers-card,
+      .integration-card,
+      .source-panel,
+      .bluetooth-panel,
+      .chat-panel {
+        transition: transform .24s ease, box-shadow .24s ease, border-color .24s ease;
+      }
+      .card:hover,
+      .home-info:hover,
+      .quick-card:hover,
+      .task-column:hover,
+      .task-tile:hover,
+      .protocol-card:hover,
+      .family-panel:hover,
+      .movers-card:hover,
+      .integration-card:hover,
+      .source-panel:hover,
+      .bluetooth-panel:hover,
+      .chat-panel:hover {
+        transform: perspective(1100px) rotateX(1.2deg) rotateY(var(--spatial-yaw, -.6deg)) translateY(-4px);
+        border-color: color-mix(in srgb, var(--accent) 42%, var(--line));
+        box-shadow:
+          0 1px 0 rgba(255,255,255,.22) inset,
+          0 30px 56px rgba(3, 8, 18, .24),
+          0 7px 18px rgba(3, 8, 18, .15);
+      }
+      .chat-panel:hover,
+      .movers-card:hover,
+      .task-column:hover { transform: perspective(1500px) rotateX(.45deg) translateY(-2px); }
+      .home-chip:hover,
+      .icon-btn:hover,
+      .proto-badge:hover,
+      .app-launcher:hover,
+      .task-row:hover { transform: translateY(-2px) translateZ(4px); }
+    }
+
+    @media (max-width: 700px) {
+      .topbar { padding: 8px 10px; border-radius: 18px; }
+      .card,
+      .home-info,
+      .quick-card,
+      .task-column,
+      .task-tile,
+      .protocol-card,
+      .family-panel,
+      .movers-card,
+      .integration-card,
+      .source-panel,
+      .bluetooth-panel,
+      .chat-panel { backdrop-filter: blur(14px) saturate(120%); -webkit-backdrop-filter: blur(14px) saturate(120%); }
+      .home-cards { perspective: 900px; }
+      .home-info { min-width: 168px; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .card,
+      .home-info,
+      .quick-card,
+      .task-column,
+      .task-tile,
+      .protocol-card,
+      .family-panel,
+      .movers-card,
+      .integration-card,
+      .source-panel,
+      .bluetooth-panel,
+      .chat-panel { transform: none !important; }
+    }
   </style>
 </head>
 <body>
