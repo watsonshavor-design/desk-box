@@ -965,6 +965,9 @@ def _enum(value, allowed, default="unknown"):
 
 
 DESK_STATUS_PATH = os.path.join(DATA_DIR, "desk-trading-status.json")
+DESK_ACCOUNT_PATH = os.path.join(DATA_DIR, "desk-account.json")
+DESK_ACCOUNT_STALE_SEC = 180
+ACCOUNT_FLOOR_USD = 6000.0
 DESK_KILL_REQUEST_PATH = os.path.join(DATA_DIR, "desk-kill-request.json")
 _DAEMON_STATES = {"alive", "dead", "unknown"}
 _OPEND_STATES = {"connected", "down", "unknown"}
@@ -1190,15 +1193,117 @@ def desk_trading_status_public():
     return _with_kill_request(pushed)
 
 
-def desk_account_snapshot():
-    """No stored book snapshot. Floor label only — no invented dollars."""
+def _money(value):
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return None
+    if parsed != parsed or parsed in (float("inf"), float("-inf")):
+        return None
+    return parsed
+
+
+def _blank_account(reason=None):
     return {
         "book_loaded": False,
+        "available": False,
         "equity": None,
+        "cash": None,
         "pnl_today": None,
         "distance_to_floor": None,
+        "floor_usd": ACCOUNT_FLOOR_USD,
         "floor_label": FLOOR_WATCH_LABEL,
+        "positions": [],
+        "working_orders": None,
+        "as_of": None,
+        "reason": reason,
+        "source": None,
     }
+
+
+def normalize_account_push(body):
+    """Keep book facts only. Drop the token. Never invent equity."""
+    if not isinstance(body, dict):
+        return None
+    equity = _money(body.get("equity"))
+    cash = _money(body.get("cash"))
+    distance = _money(body.get("distance_to_floor"))
+    available = body.get("available") is True and equity is not None and cash is not None
+    if available and distance is None:
+        distance = equity - ACCOUNT_FLOOR_USD
+    reason = body.get("reason")
+    if available or not isinstance(reason, str):
+        reason = None
+    else:
+        reason = reason.strip()[:180] or None
+    as_of = body.get("as_of")
+    if not isinstance(as_of, str) or len(as_of) > 80:
+        as_of = None
+    positions = []
+    raw_positions = body.get("positions")
+    if available and isinstance(raw_positions, list):
+        for row in raw_positions[:12]:
+            if not isinstance(row, dict):
+                continue
+            code = row.get("code")
+            if not isinstance(code, str) or not code.strip() or len(code) > 24:
+                continue
+            positions.append({
+                "code": code.strip(),
+                "qty": _money(row.get("qty")),
+                "market_val": _money(row.get("market_val")),
+                "pl_val": _money(row.get("pl_val")),
+                "nominal_price": _money(row.get("nominal_price")),
+            })
+    working = body.get("working_orders")
+    if isinstance(working, bool) or not isinstance(working, int) or working < 0:
+        working = None
+    return {
+        "available": available,
+        "book_loaded": available,
+        "equity": equity if available else None,
+        "cash": cash if available else None,
+        "pnl_today": None,
+        "market_val": _money(body.get("market_val")) if available else None,
+        "distance_to_floor": distance if available else None,
+        "floor_usd": ACCOUNT_FLOOR_USD,
+        "floor_label": FLOOR_WATCH_LABEL,
+        "positions": positions if available else [],
+        "working_orders": working if available else None,
+        "as_of": as_of,
+        "reason": reason,
+        "pushed_at": datetime.now(timezone.utc).isoformat(),
+        "source": "opend",
+    }
+
+
+def store_account_push(payload):
+    _atomic_json(DESK_ACCOUNT_PATH, payload)
+
+
+def desk_account_snapshot():
+    """Last fresh OpenD push. Missing or stale stays unloaded — no invented NAV."""
+    data = _read_json_file(DESK_ACCOUNT_PATH)
+    if not data:
+        return _blank_account("no snapshot yet")
+    pushed = _parse_utc(data.get("pushed_at"))
+    if pushed is None:
+        return _blank_account("snapshot has no time")
+    age = (datetime.now(timezone.utc) - pushed).total_seconds()
+    if age < 0 or age > DESK_ACCOUNT_STALE_SEC:
+        return _blank_account("snapshot stale")
+    clean = normalize_account_push(data)
+    if clean is None:
+        return _blank_account("snapshot unreadable")
+    clean["pushed_at"] = data.get("pushed_at")
+    if not clean.get("available"):
+        blank = _blank_account(clean.get("reason") or "book unavailable")
+        blank["as_of"] = clean.get("as_of")
+        blank["pushed_at"] = data.get("pushed_at")
+        return blank
+    return clean
 
 
 def write_kill_file():
@@ -1354,6 +1459,33 @@ def _desk_token_from(request, body=None):
     if isinstance(body, dict) and _token_match(body.get("token") or ""):
         return True
     return _token_match(request.query_params.get("token") or "")
+
+
+@app.post("/api/desk/account/ingest")
+async def desk_account_ingest(request: Request):
+    """Local OpenD book push. Token in JSON or query, never logged."""
+    try:
+        body = await request.json()
+    except Exception:
+        body = None
+    if not isinstance(body, dict) or not _desk_token_from(request, body):
+        return JSONResponse({"error": "bad token"}, status_code=403)
+    payload = normalize_account_push(body)
+    if payload is None:
+        return JSONResponse({"error": "bad payload"}, status_code=400)
+    try:
+        store_account_push(payload)
+    except OSError:
+        return JSONResponse({"ok": False, "error": "could not store"}, status_code=500)
+    public = desk_account_snapshot()
+    return JSONResponse({
+        "ok": True,
+        "book_loaded": public.get("book_loaded"),
+        "available": public.get("available"),
+        "equity": public.get("equity"),
+        "cash": public.get("cash"),
+        "distance_to_floor": public.get("distance_to_floor"),
+    })
 
 
 @app.post("/api/desk/trading/ingest")

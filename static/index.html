@@ -750,9 +750,9 @@
             <article class="home-info ops-card" id="homeAccount">
               <p class="home-kicker">Account</p>
               <ul class="ops-facts" id="accountFacts">
-                <li><span>Equity</span><strong id="acctEquity">unknown</strong></li>
-                <li><span>Today's P/L</span><strong id="acctPnl">unknown</strong></li>
-                <li><span>Distance to floor</span><strong id="acctDistance">unknown</strong></li>
+                <li><span>Equity</span><strong id="acctEquity">unavailable</strong></li>
+                <li><span>Cash</span><strong id="acctCash">unavailable</strong></li>
+                <li><span>Distance to floor</span><strong id="acctDistance">unavailable</strong></li>
               </ul>
               <p class="home-quiet" id="acctFloor">Floor watch $6,000</p>
             </article>
@@ -1626,12 +1626,27 @@
           killNote.textContent = 'Second tap writes the desk halt. It does not close positions.';
         }
       }
+      function money(n){
+        var v = Number(n);
+        if (!isFinite(v)) return 'unavailable';
+        var sign = v < 0 ? '-' : '';
+        return sign + '$' + Math.abs(v).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+      }
       function paintAccount(data){
         data = data || {};
-        document.getElementById('acctEquity').textContent = data.book_loaded && data.equity != null ? String(data.equity) : 'unknown';
-        document.getElementById('acctPnl').textContent = data.book_loaded && data.pnl_today != null ? String(data.pnl_today) : 'unknown';
-        document.getElementById('acctDistance').textContent = data.book_loaded && data.distance_to_floor != null ? String(data.distance_to_floor) : 'unknown';
-        document.getElementById('acctFloor').textContent = data.floor_label || 'Floor watch $6,000';
+        var live = !!(data.book_loaded && data.equity != null && data.cash != null);
+        document.getElementById('acctEquity').textContent = live ? money(data.equity) : 'unavailable';
+        document.getElementById('acctCash').textContent = live ? money(data.cash) : 'unavailable';
+        var dist = document.getElementById('acctDistance');
+        if (live && data.distance_to_floor != null && isFinite(Number(data.distance_to_floor))) {
+          var d = Number(data.distance_to_floor);
+          dist.textContent = money(Math.abs(d)) + (d < 0 ? ' below' : ' above');
+        } else {
+          dist.textContent = 'unavailable';
+        }
+        var floor = data.floor_label || 'Floor watch $6,000';
+        if (!live && data.reason) floor = floor + ' · ' + String(data.reason).slice(0, 80);
+        document.getElementById('acctFloor').textContent = floor;
       }
       function paintMorning(data){
         data = data || {};
@@ -1724,6 +1739,11 @@
               note.textContent = res.body.already ? 'Halt file was already there.' : 'Halt file written. Trading stops. Positions were not closed from this button.';
             }
             loadDeskOps();
+      setInterval(function(){
+        var tok = deskTok();
+        if (!tok) { paintAccount({}); return; }
+        fetch('/api/desk/account?token=' + encodeURIComponent(tok)).then(function(r){ if(!r.ok) throw new Error(); return r.json(); }).then(paintAccount).catch(function(){ paintAccount({}); });
+      }, 60000);
           } else {
             note.textContent = (res.body && res.body.error) ? res.body.error : 'KILL was not written.';
           }
