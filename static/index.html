@@ -568,6 +568,11 @@
     .yt-connect { width:100%; max-width:420px; min-height:56px; font-size:17px; border-radius:16px; margin-top:16px; }
     .yt-connect:disabled { opacity:.55; cursor:default; }
     .yt-empty { margin-top:18px; padding:18px; border-radius:16px; background:var(--surface-2); color:var(--muted); font-size:14px; line-height:1.5; }
+    .yt-list { display:grid; gap:10px; margin-top:16px; }
+    .yt-card { display:flex; gap:12px; align-items:center; text-decoration:none; color:inherit; padding:10px; border-radius:16px; background:var(--surface-2); min-height:84px; }
+    .yt-card img { width:120px; height:68px; object-fit:cover; border-radius:10px; background:#111; flex:0 0 auto; }
+    .yt-card h3 { margin:0 0 4px; font-size:15px; letter-spacing:-.02em; }
+    .yt-card small { color:var(--muted); font:500 11px "IBM Plex Mono", monospace; word-break:break-all; }
 
   </style>
 </head>
@@ -856,7 +861,7 @@
           <p class="maps-note">Playlists show up here after Google sign-in. Nothing is listed until that connection exists.</p>
           <button type="button" class="primary-btn yt-connect" id="youtubeConnect" disabled aria-disabled="true">Connect YouTube</button>
           <div class="yt-empty" id="youtubeStatus">Checking whether Google sign-in is set up…</div>
-          <div id="youtubePlaylists"></div>
+          <div class="yt-list" id="youtubePlaylists"></div>
         </div>
       </section>
     </main>
@@ -1511,44 +1516,89 @@
       document.getElementById('youtubeConnect').addEventListener('click', function(){
         var btn = document.getElementById('youtubeConnect');
         if (btn.disabled) return;
-        showToast('Google sign-in is not ready on this server');
+        var tok = deskToken();
+        if (!tok) {
+          showToast('Open the desk with your room token first');
+          return;
+        }
+        window.location.href = '/api/youtube/start?token=' + encodeURIComponent(tok);
       });
+      function renderYouTube(rows){
+        var list = document.getElementById('youtubePlaylists');
+        if (!list) return;
+        list.innerHTML = rows.map(function(item){
+          if (!item || !item.id || !item.title) return '';
+          var href = item.url || ('https://www.youtube.com/playlist?list=' + encodeURIComponent(item.id));
+          var img = item.thumbnail ? '<img alt="" src="' + homeEsc(item.thumbnail) + '">' : '';
+          return '<a class="yt-card" href="' + homeEsc(href) + '" target="_blank" rel="noopener noreferrer">' + img + '<div><h3>' + homeEsc(item.title) + '</h3><small>' + homeEsc(item.id) + '</small></div></a>';
+        }).join('');
+      }
       function loadYouTube(){
         var status = document.getElementById('youtubeStatus');
         var btn = document.getElementById('youtubeConnect');
         var list = document.getElementById('youtubePlaylists');
+        var note = document.querySelector('#youtubeView .maps-note');
         if (list) list.innerHTML = '';
+        function showConnect(on){
+          btn.style.display = on ? '' : 'none';
+          if (note) note.style.display = on ? '' : 'none';
+        }
         var tok = deskToken();
         if (!tok) {
-          status.textContent = 'Connect YouTube needs the desk open with your room token. No playlists are shown.';
+          showConnect(true);
           btn.disabled = true;
+          btn.setAttribute('aria-disabled', 'true');
+          status.style.display = '';
+          status.textContent = 'Connect YouTube needs the desk open with your room token. No playlists are shown.';
           return;
         }
         fetch('/api/youtube?token=' + encodeURIComponent(tok)).then(function(r){
           if (!r.ok) throw new Error('youtube');
           return r.json();
         }).then(function(data){
-          var rows = (data && data.playlists) || [];
-          if (rows.length && list) {
-            list.innerHTML = rows.map(function(item){
-              if (!item || !item.title || !item.url) return '';
-              return '<a class="home-item no-img" href="' + homeEsc(item.url) + '" target="_blank" rel="noopener noreferrer"><div><h3>' + homeEsc(item.title) + '</h3></div></a>';
-            }).join('');
-            status.textContent = 'Playlists from your Google account.';
+          data = data || {};
+          if (!data.configured) {
+            showConnect(true);
+            btn.disabled = true;
+            btn.setAttribute('aria-disabled', 'true');
+            status.style.display = '';
+            status.textContent = 'Connect YouTube is waiting on the Google OAuth client. No playlists are shown.';
             return;
           }
+          if (!data.connected) {
+            showConnect(true);
+            btn.disabled = false;
+            btn.removeAttribute('aria-disabled');
+            btn.textContent = 'Connect YouTube';
+            status.style.display = 'none';
+            status.textContent = '';
+            return;
+          }
+          showConnect(false);
+          var rows = data.playlists || [];
+          if (!rows.length) {
+            status.style.display = '';
+            status.textContent = data.blocker === 'youtube_api'
+              ? 'Connected, but YouTube did not return playlists. None are shown.'
+              : 'Connected. YouTube returned no playlists.';
+            return;
+          }
+          status.style.display = 'none';
+          status.textContent = '';
+          renderYouTube(rows);
+        }).catch(function(){
+          showConnect(true);
           btn.disabled = true;
           btn.setAttribute('aria-disabled', 'true');
-          if (data && data.configured) {
-            status.textContent = 'A Google client id is set, but playlist sign-in is not finished on this server. No titles are shown.';
-          } else {
-            status.textContent = 'Connect YouTube is waiting on a Google OAuth client id. Your playlists will appear after that sign-in. None are listed now.';
-          }
-        }).catch(function(){
-          btn.disabled = true;
+          status.style.display = '';
           status.textContent = 'YouTube status could not be checked. No playlists are shown.';
         });
       }
+      var ytFlag = new URLSearchParams(location.search).get('yt');
+      if (ytFlag === 'connected' || ytFlag === 'denied' || ytFlag === 'error') switchView('youtube');
+      if (ytFlag === 'connected') showToast('YouTube connected');
+      else if (ytFlag === 'denied') showToast('YouTube connect was cancelled');
+      else if (ytFlag === 'error') showToast('YouTube connect did not finish');
       loadYouTube();
       loadHome();
 

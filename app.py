@@ -27,12 +27,14 @@ import xml.etree.ElementTree as ET
 from zoneinfo import ZoneInfo
 
 import httpx
+import hmac
 import secrets
 import uuid
+from urllib.parse import urlencode
 from datetime import datetime, timedelta, timezone
 
 from fastapi import FastAPI, File, Request, UploadFile, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse, JSONResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from providers import PROVIDERS
@@ -1255,24 +1257,324 @@ def mark_png(size, phase=None):
 _mark_png_cache = {}
 
 
-def youtube_status():
-    """True only when a public OAuth client id is configured. Never returns the value."""
-    configured = False
+YOUTUBE_REDIRECT_URI = (
+    os.environ.get("YOUTUBE_REDIRECT_URI")
+    or "https://desk-box-production.up.railway.app/api/youtube/callback"
+).strip()
+YOUTUBE_SCOPE = "https://www.googleapis.com/auth/youtube.readonly"
+YOUTUBE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
+YOUTUBE_TOKEN_URL = "https://oauth2.googleapis.com/token"
+YOUTUBE_PLAYLISTS_URL = "https://www.googleapis.com/youtube/v3/playlists"
+YOUTUBE_TOKEN_PATH = os.path.join(DATA_DIR, "youtube-refresh.json")
+YOUTUBE_STATE_PATH = os.path.join(DATA_DIR, "youtube-oauth-state.json")
+_YOUTUBE_STATE_TTL = 600
+
+
+def _token_match(got):
+    if not isinstance(got, str) or not got:
+        return False
+    try:
+        return hmac.compare_digest(got.encode(), DESK_TOKEN.encode())
+    except Exception:
+        return False
+
+
+def _google_oauth_creds():
+    """Client id and secret from env only. Never log or return these to the browser JSON."""
+    client_id = ""
     for name in _YOUTUBE_CLIENT_ENVS:
-        if (os.environ.get(name) or "").strip():
-            configured = True
+        client_id = (os.environ.get(name) or "").strip()
+        if client_id:
             break
-    if configured:
+    client_secret = (
+        (os.environ.get("GOOGLE_CLIENT_SECRET") or "").strip()
+        or (os.environ.get("YOUTUBE_CLIENT_SECRET") or "").strip()
+    )
+    return client_id, client_secret
+
+
+def _secret_read(path):
+    try:
+        with open(path) as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def _secret_write(path, payload):
+    directory = os.path.dirname(path)
+    if directory:
+        os.makedirs(directory, exist_ok=True)
+    tmp = f"{path}.{os.getpid()}.tmp"
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    try:
+        with os.fdopen(fd, "w") as fh:
+            json.dump(payload, fh)
+            fh.write("\n")
+        os.chmod(tmp, 0o600)
+        os.replace(tmp, path)
+        os.chmod(path, 0o600)
+    except Exception:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+        raise
+
+
+def _youtube_configured():
+    client_id, client_secret = _google_oauth_creds()
+    return bool(client_id and client_secret)
+
+
+def _youtube_connected():
+    saved = _secret_read(YOUTUBE_TOKEN_PATH)
+    return bool((saved.get("refresh_token") or "").strip())
+
+
+def _save_oauth_state(state):
+    now = time.time()
+    data = _secret_read(YOUTUBE_STATE_PATH)
+    items = data.get("states") if isinstance(data.get("states"), list) else []
+    fresh = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        try:
+            at = float(item.get("at") or 0)
+        except (TypeError, ValueError):
+            continue
+        if now - at < _YOUTUBE_STATE_TTL and item.get("state"):
+            fresh.append({"state": item["state"], "at": at})
+    fresh.append({"state": state, "at": now})
+    _secret_write(YOUTUBE_STATE_PATH, {"states": fresh[-8:]})
+
+
+def _consume_oauth_state(state):
+    if not isinstance(state, str) or not state:
+        return False
+    now = time.time()
+    data = _secret_read(YOUTUBE_STATE_PATH)
+    items = data.get("states") if isinstance(data.get("states"), list) else []
+    keep = []
+    ok = False
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        try:
+            at = float(item.get("at") or 0)
+        except (TypeError, ValueError):
+            continue
+        if now - at >= _YOUTUBE_STATE_TTL:
+            continue
+        saved = item.get("state") or ""
+        if (not ok) and saved and hmac.compare_digest(saved, state):
+            ok = True
+            continue
+        if saved:
+            keep.append({"state": saved, "at": at})
+    try:
+        _secret_write(YOUTUBE_STATE_PATH, {"states": keep})
+    except OSError:
+        pass
+    return ok
+
+
+def _youtube_authorize_url(state):
+    client_id, _secret = _google_oauth_creds()
+    query = urlencode({
+        "client_id": client_id,
+        "redirect_uri": YOUTUBE_REDIRECT_URI,
+        "response_type": "code",
+        "scope": YOUTUBE_SCOPE,
+        "state": state,
+        "access_type": "offline",
+        "prompt": "consent",
+        "include_granted_scopes": "false",
+    })
+    return f"{YOUTUBE_AUTH_URL}?{query}"
+
+
+def _store_youtube_tokens(body, previous=None):
+    previous = previous or {}
+    refresh = (body.get("refresh_token") or previous.get("refresh_token") or "").strip()
+    access = (body.get("access_token") or "").strip()
+    if not refresh:
+        return False
+    try:
+        expires_in = int(body.get("expires_in") or 3600)
+    except (TypeError, ValueError):
+        expires_in = 3600
+    payload = {
+        "refresh_token": refresh,
+        "access_token": access,
+        "expires_at": time.time() + max(0, expires_in),
+        "scope": YOUTUBE_SCOPE,
+    }
+    _secret_write(YOUTUBE_TOKEN_PATH, payload)
+    return True
+
+
+async def _youtube_access_token(client):
+    saved = _secret_read(YOUTUBE_TOKEN_PATH)
+    access = (saved.get("access_token") or "").strip()
+    try:
+        exp = float(saved.get("expires_at") or 0)
+    except (TypeError, ValueError):
+        exp = 0
+    if access and exp > time.time() + 60:
+        return access, None
+    refresh = (saved.get("refresh_token") or "").strip()
+    client_id, client_secret = _google_oauth_creds()
+    if not refresh:
+        return None, "not_connected"
+    if not client_id or not client_secret:
+        return None, "not_configured"
+    try:
+        resp = await client.post(
+            YOUTUBE_TOKEN_URL,
+            data={
+                "client_id": client_id,
+                "client_secret": client_secret,
+                "refresh_token": refresh,
+                "grant_type": "refresh_token",
+            },
+            timeout=20,
+        )
+    except Exception:
+        log.info("youtube token refresh failed")
+        return None, "refresh_failed"
+    if resp.status_code != 200:
+        log.info("youtube token refresh rejected status=%s", resp.status_code)
+        return None, "refresh_failed"
+    try:
+        body = resp.json()
+    except Exception:
+        return None, "refresh_failed"
+    if not isinstance(body, dict) or not _store_youtube_tokens(body, saved):
+        return None, "refresh_failed"
+    return (body.get("access_token") or "").strip() or None, None
+
+
+def _playlist_row(row):
+    if not isinstance(row, dict):
+        return None
+    playlist_id = row.get("id")
+    snippet = row.get("snippet") if isinstance(row.get("snippet"), dict) else {}
+    title = snippet.get("title")
+    if not isinstance(playlist_id, str) or not playlist_id:
+        return None
+    if not isinstance(title, str) or not title.strip():
+        return None
+    item = {
+        "id": playlist_id[:80],
+        "title": title.strip()[:200],
+        "url": f"https://www.youtube.com/playlist?list={playlist_id}",
+    }
+    thumbs = snippet.get("thumbnails") if isinstance(snippet.get("thumbnails"), dict) else {}
+    for key in ("medium", "high", "default", "standard", "maxres"):
+        thumb = thumbs.get(key)
+        if not isinstance(thumb, dict):
+            continue
+        url = thumb.get("url")
+        if isinstance(url, str) and url.startswith("https://"):
+            item["thumbnail"] = url[:500]
+            break
+    return item
+
+
+async def _fetch_youtube_playlists(client, access):
+    rows = []
+    page = None
+    for _ in range(4):
+        params = {"part": "snippet", "mine": "true", "maxResults": "50"}
+        if page:
+            params["pageToken"] = page
+        try:
+            resp = await client.get(
+                YOUTUBE_PLAYLISTS_URL,
+                params=params,
+                headers={"Authorization": f"Bearer {access}"},
+                timeout=20,
+            )
+        except Exception:
+            log.info("youtube playlist fetch failed")
+            return None
+        if resp.status_code != 200:
+            log.info("youtube playlist fetch status=%s", resp.status_code)
+            return None
+        try:
+            body = resp.json()
+        except Exception:
+            return None
+        if not isinstance(body, dict):
+            return None
+        for raw in body.get("items") or []:
+            item = _playlist_row(raw)
+            if item:
+                rows.append(item)
+        page = body.get("nextPageToken")
+        if not isinstance(page, str) or not page:
+            break
+    return rows
+
+
+async def youtube_status():
+    """Connection state and real playlists only. Never returns OAuth secrets."""
+    configured = _youtube_configured()
+    if not configured:
+        return {
+            "configured": False,
+            "connected": False,
+            "playlists": [],
+            "blocker": "google_oauth_client_id",
+        }
+    if not _youtube_connected():
         return {
             "configured": True,
+            "connected": False,
             "playlists": [],
             "blocker": None,
         }
+    async with httpx.AsyncClient() as client:
+        access, err = await _youtube_access_token(client)
+        if not access:
+            return {
+                "configured": True,
+                "connected": False,
+                "playlists": [],
+                "blocker": err or "not_connected",
+            }
+        playlists = await _fetch_youtube_playlists(client, access)
+    if playlists is None:
+        return {
+            "configured": True,
+            "connected": True,
+            "playlists": [],
+            "blocker": "youtube_api",
+        }
     return {
-        "configured": False,
-        "playlists": [],
-        "blocker": "google_oauth_client_id",
+        "configured": True,
+        "connected": True,
+        "playlists": playlists,
+        "blocker": None,
     }
+
+
+async def _desk_authorized(request: Request, token: str = ""):
+    if _token_match(token):
+        return True
+    if _token_match(request.query_params.get("token") or ""):
+        return True
+    if request.method == "POST":
+        try:
+            body = await request.json()
+        except Exception:
+            body = None
+        if isinstance(body, dict) and _token_match(body.get("token") or ""):
+            return True
+    return False
 
 
 @app.get("/api/theme")
@@ -1333,10 +1635,83 @@ async def web_manifest():
 
 @app.get("/api/youtube")
 async def youtube_tab(token: str = ""):
-    """Playlist shell. Empty until a Google OAuth client id exists. No invented rows."""
+    """Real playlists after OAuth. Empty until the account is connected."""
     if token != DESK_TOKEN:
         return JSONResponse({"error": "bad token"}, status_code=403)
-    return JSONResponse(youtube_status())
+    return JSONResponse(await youtube_status())
+
+
+@app.api_route("/api/youtube/start", methods=["GET", "POST"])
+async def youtube_start(request: Request, token: str = ""):
+    """Send the browser to Google OAuth. Room token is query or JSON, never Bearer."""
+    if not await _desk_authorized(request, token):
+        return JSONResponse({"error": "bad token"}, status_code=403)
+    if not _youtube_configured():
+        return JSONResponse({"configured": False, "error": "not_configured"}, status_code=503)
+    state = secrets.token_urlsafe(24)
+    try:
+        _save_oauth_state(state)
+    except OSError:
+        log.info("youtube oauth state could not be stored")
+        return JSONResponse({"error": "state_store"}, status_code=500)
+    log.info("youtube oauth start")
+    return RedirectResponse(_youtube_authorize_url(state), status_code=302)
+
+
+@app.get("/api/youtube/callback")
+async def youtube_callback(code: str = "", state: str = "", error: str = ""):
+    """Exchange the Google code and store the refresh token under DESK_DATA_DIR."""
+    if error or not code or not state or not _consume_oauth_state(state):
+        log.info("youtube oauth callback rejected")
+        return RedirectResponse("/?yt=denied#youtube", status_code=302)
+    client_id, client_secret = _google_oauth_creds()
+    if not client_id or not client_secret:
+        return RedirectResponse("/?yt=error#youtube", status_code=302)
+    try:
+        async with httpx.AsyncClient() as client:
+            resp = await client.post(
+                YOUTUBE_TOKEN_URL,
+                data={
+                    "code": code,
+                    "client_id": client_id,
+                    "client_secret": client_secret,
+                    "redirect_uri": YOUTUBE_REDIRECT_URI,
+                    "grant_type": "authorization_code",
+                },
+                timeout=20,
+            )
+    except Exception:
+        log.info("youtube oauth exchange failed")
+        return RedirectResponse("/?yt=error#youtube", status_code=302)
+    if resp.status_code != 200:
+        log.info("youtube oauth exchange status=%s", resp.status_code)
+        return RedirectResponse("/?yt=error#youtube", status_code=302)
+    try:
+        body = resp.json()
+    except Exception:
+        return RedirectResponse("/?yt=error#youtube", status_code=302)
+    if not isinstance(body, dict):
+        return RedirectResponse("/?yt=error#youtube", status_code=302)
+    scope = body.get("scope") or ""
+    if isinstance(scope, str) and scope.strip():
+        allowed = {
+            "https://www.googleapis.com/auth/youtube.readonly",
+            "youtube.readonly",
+        }
+        parts = scope.split()
+        if not parts or any(part not in allowed for part in parts):
+            log.info("youtube oauth scope rejected")
+            return RedirectResponse("/?yt=error#youtube", status_code=302)
+    try:
+        stored = _store_youtube_tokens(body, _secret_read(YOUTUBE_TOKEN_PATH))
+    except OSError:
+        log.info("youtube refresh token could not be stored")
+        return RedirectResponse("/?yt=error#youtube", status_code=302)
+    if not stored:
+        log.info("youtube oauth returned no refresh token")
+        return RedirectResponse("/?yt=error#youtube", status_code=302)
+    log.info("youtube oauth connected")
+    return RedirectResponse("/?yt=connected#youtube", status_code=302)
 
 
 @app.get("/api/gainers")

@@ -2,3 +2,6 @@ __pycache__/
 *.pyc
 .env
 desk-log.jsonl
+youtube-refresh.json
+youtube-oauth-state.json
+*.tmp
