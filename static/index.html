@@ -420,11 +420,16 @@
       border-radius: 22px; padding: 14px 16px 13px; min-height: 118px;
       display: flex; flex-direction: column; gap: 2px;
     }
+    .home-info.home-compact {
+      align-self: start; min-height: 0; padding: 12px 14px 11px;
+    }
+    .home-compact .home-big { margin-top: 5px; }
+    .home-compact .home-desk-label { margin-top: 8px; font-size: 17px; }
     .home-kicker { margin: 0; font-size: 14px; font-weight: 700; letter-spacing: -.01em; }
     .home-big { margin: 6px 0 0; font-size: 32px; font-weight: 700; letter-spacing: -.04em; line-height: 1; }
     .home-desk-label { font-size: 18px; letter-spacing: -.02em; line-height: 1.25; margin-top: 10px; }
     .home-sub { margin: 6px 0 0; color: var(--muted); font-size: 12px; font-weight: 600; }
-    .home-meta { margin-top: auto; display: flex; gap: 10px; align-items: center; color: var(--muted); font-size: 12px; font-weight: 650; padding-top: 8px; }
+    .home-meta { margin-top: auto; display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: center; color: var(--muted); font-size: 12px; font-weight: 650; padding-top: 8px; }
     .home-meta .aqi-dot { width: 8px; height: 8px; border-radius: 50%; background: #3c9a62; display: inline-block; }
     .home-meta .aqi-dot.warn { background: var(--warm); }
     .home-meta .aqi-dot.bad { background: var(--danger); }
@@ -696,22 +701,24 @@
             <button type="button" class="home-chip" data-go="family">Elijah &amp; Natalia</button>
           </div>
           <div class="home-cards" id="homeCards">
-            <article class="home-info" id="homeWeather">
+            <article class="home-info home-compact" id="homeWeather">
               <p class="home-kicker">Taylors</p>
               <p class="home-big" id="homeTemp">…</p>
               <p class="home-sub" id="homeCond">Checking weather</p>
               <div class="home-meta" id="homeWeatherMeta"><span id="homePrecip"></span><span id="homeAqi"></span></div>
             </article>
-            <article class="home-info" id="homeSunset">
+            <article class="home-info home-compact" id="homeSunset">
               <p class="home-kicker">Sunset today</p>
               <p class="home-big" id="homeSunsetTime">…</p>
-              <p class="home-sub" id="homeSunsetSub">Taylors</p>
+              <p class="home-sub" id="homeSunsetSub">Sunrise unavailable</p>
               <div class="home-meta"><span class="home-sun" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="4"/><path d="M12 3v2M12 19v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M3 12h2M19 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg></span></div>
             </article>
-            <article class="home-info" id="homeDeskCard">
+            <article class="home-info home-compact" id="homeDeskCard">
               <p class="home-kicker">Desk</p>
               <p class="home-big home-desk-label">KALA is watch-only</p>
               <p class="home-quiet" id="homeFloorLine">Floor watch $6,000</p>
+              <p class="home-sub" id="homeDeskSession">Session unavailable</p>
+              <p class="home-sub" id="homeDeskAccountLine">Account snapshot unavailable</p>
             </article>
             <article class="home-info" id="homeMapsCard">
               <p class="home-kicker">Directions</p>
@@ -1543,7 +1550,7 @@
         var sunSub = document.getElementById('homeSunsetSub');
         if (sun.ok && sun.label) {
           sunEl.textContent = sun.label;
-          sunSub.textContent = 'Taylors';
+          sunSub.textContent = sun.sunrise_label ? ('Sunrise ' + sun.sunrise_label) : 'Sunrise unavailable';
         } else {
           sunEl.textContent = '—';
           sunSub.textContent = 'Sunset unavailable';
@@ -1601,8 +1608,11 @@
         return 'overnight';
       }
       function paintSession(){
+        var session = sessionName(new Date());
         var el = document.getElementById('sessionClock');
-        if (el) el.textContent = sessionName(new Date());
+        if (el) el.textContent = session;
+        var deskSession = document.getElementById('homeDeskSession');
+        if (deskSession) deskSession.textContent = 'Session ' + session;
       }
       function paintTrading(data){
         data = data || {};
@@ -1650,6 +1660,15 @@
         var floor = data.floor_label || 'Floor watch $6,000';
         if (!live && data.reason) floor = floor + ' · ' + String(data.reason).slice(0, 80);
         document.getElementById('acctFloor').textContent = floor;
+        var deskAccount = document.getElementById('homeDeskAccountLine');
+        if (deskAccount) {
+          if (live && data.distance_to_floor != null && isFinite(Number(data.distance_to_floor))) {
+            var deskDistance = Number(data.distance_to_floor);
+            deskAccount.textContent = 'Floor distance ' + money(Math.abs(deskDistance)) + (deskDistance < 0 ? ' below' : ' above');
+          } else {
+            deskAccount.textContent = 'Account snapshot unavailable';
+          }
+        }
       }
       function paintMorning(data){
         data = data || {};

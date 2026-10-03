@@ -1789,7 +1789,7 @@ async def build_home_payload(force=False):
         f"?latitude={lat}&longitude={lng}"
         "&current=temperature_2m,weather_code"
         "&hourly=precipitation_probability"
-        "&daily=sunset"
+        "&daily=sunrise,sunset"
         "&temperature_unit=fahrenheit"
         "&timezone=America%2FNew_York"
         "&forecast_days=2"
@@ -1844,12 +1844,21 @@ async def build_home_payload(force=False):
                     "aqi": aqi,
                     "observed_at": cur.get("time"),
                 }
-            suns = ((data.get("daily") or {}).get("sunset") or [None])[0]
+            daily = data.get("daily") or {}
+            sunrise = (daily.get("sunrise") or [None])[0]
+            suns = (daily.get("sunset") or [None])[0]
+            sunrise_label = _fmt_sunset_local(sunrise) if isinstance(sunrise, str) else None
             # Prefer today's sunset. If the first entry is already past, still show it
             # (the card is "sunset today"). Open-Meteo daily[0] is the local date.
             label = _fmt_sunset_local(suns) if isinstance(suns, str) else None
             if label:
-                sunset = {"ok": True, "label": label, "at": suns, "tz": TAYLORS_TZ}
+                sunset = {
+                    "ok": True,
+                    "label": label,
+                    "at": suns,
+                    "sunrise_label": sunrise_label,
+                    "tz": TAYLORS_TZ,
+                }
 
     payload = {
         "place": "Taylors",
