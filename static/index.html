@@ -1588,14 +1588,17 @@
       }
       function sessionName(d){
         var p = etParts(d || new Date());
-        if (p.weekday === 'Sat' || p.weekday === 'Sun') return 'closed';
         var hour = parseInt(p.hour, 10);
         if (hour === 24) hour = 0;
         var mins = hour * 60 + parseInt(p.minute, 10);
+        // Same bounds as session_name() in app.py. Overnight week opens Sun 20:00 ET.
+        if (p.weekday === 'Sat') return 'closed';
+        if (p.weekday === 'Sun') return mins >= 1200 ? 'overnight' : 'closed';
         if (mins >= 240 && mins < 570) return 'pre-market';
-        if (mins >= 570 && mins < 960) return 'regular';
-        if (mins >= 960 && mins < 1200) return 'after-hours';
-        return 'closed';
+        if (mins >= 570 && mins < 960) return 'live';
+        if (mins >= 960 && mins < 1200) return 'overnight';
+        if (mins >= 1200 && p.weekday === 'Fri') return 'closed';
+        return 'overnight';
       }
       function paintSession(){
         var el = document.getElementById('sessionClock');

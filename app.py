@@ -853,22 +853,34 @@ _TERMINAL_QUEUE_STATUSES = {
 
 
 def session_name(now=None):
-    """Weekday session clock in America/New_York. Weekends are closed."""
+    """US equity session in America/New_York.
+
+    One of overnight, pre-market, live, closed. Weekday bounds stay
+    04:00 pre-market, 09:30 live, 16:00 overnight. The overnight week
+    opens Sunday 20:00 and runs through Friday 20:00, including the
+    20:00–04:00 nights. Saturday, Sunday before 20:00, and Friday from
+    20:00 are closed.
+    """
     now = now or datetime.now(ZoneInfo(TAYLORS_TZ))
     if now.tzinfo is None:
         now = now.replace(tzinfo=ZoneInfo(TAYLORS_TZ))
     else:
         now = now.astimezone(ZoneInfo(TAYLORS_TZ))
-    if now.weekday() >= 5:
-        return "closed"
     minutes = now.hour * 60 + now.minute
+    weekday = now.weekday()  # Mon=0 … Sun=6
+    if weekday == 5:
+        return "closed"
+    if weekday == 6:
+        return "overnight" if minutes >= 20 * 60 else "closed"
     if 4 * 60 <= minutes < 9 * 60 + 30:
         return "pre-market"
     if 9 * 60 + 30 <= minutes < 16 * 60:
-        return "regular"
+        return "live"
     if 16 * 60 <= minutes < 20 * 60:
-        return "after-hours"
-    return "closed"
+        return "overnight"
+    if minutes >= 20 * 60 and weekday == 4:
+        return "closed"
+    return "overnight"
 
 
 def _desk_state_dir():
