@@ -586,6 +586,28 @@
     .yt-card img { width:120px; height:68px; object-fit:cover; border-radius:10px; background:#111; flex:0 0 auto; }
     .yt-card h3 { margin:0 0 4px; font-size:15px; letter-spacing:-.02em; }
     .yt-card small { color:var(--muted); font:500 11px "IBM Plex Mono", monospace; word-break:break-all; }
+    .yt-card { text-decoration:none; }
+    .yt-card.marked { outline:2px solid var(--accent); }
+    .yt-actions { display:flex; flex-wrap:wrap; gap:8px; margin-top:8px; }
+    .yt-actions button { min-height:48px; padding:10px 14px; border-radius:14px; }
+    .read-aloud {
+      min-height:56px; min-width:56px; padding:0 16px; border-radius:16px;
+      border:1px solid var(--line); background:var(--accent); color:#fff;
+      font-weight:800; font-size:15px; display:inline-flex; align-items:center; gap:8px; cursor:pointer;
+    }
+    @media (prefers-color-scheme: dark){ .read-aloud { color:#160d21; } }
+    .read-aloud[aria-pressed="false"] { background:var(--surface); color:var(--ink); }
+    .read-aloud svg { width:22px; height:22px; }
+    #micBtn { display:none !important; }
+    .leave-by { margin-top:12px; padding:12px 14px; border-radius:14px; background:var(--surface-2); }
+    .leave-by p { margin:0 0 6px; color:var(--muted); font-size:13px; line-height:1.45; }
+    .leave-by strong { color:var(--ink); }
+    .leave-by label { display:flex; align-items:center; gap:10px; font-size:13px; font-weight:750; margin:8px 0; }
+    .leave-by input[type="time"] { min-height:44px; border-radius:12px; border:1px solid var(--line); background:var(--surface); color:var(--ink); font:inherit; padding:0 10px; }
+    .family-panel { max-width:720px; border-radius:24px; padding:22px; }
+    .family-panel h2 { margin:0 0 10px; letter-spacing:-.03em; }
+    .family-panel p { margin:0 0 12px; color:var(--muted); font-size:15px; line-height:1.55; }
+    .home-quiet { margin:8px 0 0; color:var(--muted); font-size:13px; font-weight:650; }
 
   </style>
 </head>
@@ -612,6 +634,7 @@
         <button class="nav-btn" data-view="youtube"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="6" width="18" height="12" rx="3"/><path d="m10 9 5 3-5 3V9Z"/></svg><span>YouTube</span></button>
         <button class="nav-btn" data-view="tasks"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m9 11 2 2 4-5"/><path d="M19 12a7 7 0 1 1-4.1-6.37"/></svg><span>Tasks</span><span class="count">3</span></button>
         <button class="nav-btn" data-view="briefing"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 19.5V5a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v14.5"/><path d="M8 7h8M8 11h8M8 15h5M2 19h20"/></svg><span>Briefing</span><span class="count">3</span></button>
+        <button class="nav-btn" data-view="family" aria-label="Elijah and Natalia"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 20V6a2 2 0 0 1 2-2h8l6 6v10a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2Z"/><path d="M14 4v6h6"/></svg><span>Elijah &amp; Natalia</span></button>
       </nav>
       <div class="rail-foot">
         <div class="mode-card">
@@ -649,6 +672,7 @@
             <button type="button" class="home-chip" data-go="maps">Maps</button>
             <button type="button" class="home-chip" data-go="youtube">YouTube</button>
             <button type="button" class="home-chip" data-go="briefing">Briefing</button>
+            <button type="button" class="home-chip" data-go="family">Elijah &amp; Natalia</button>
           </div>
           <div class="home-cards" id="homeCards">
             <article class="home-info" id="homeWeather">
@@ -666,7 +690,7 @@
             <article class="home-info" id="homeDeskCard">
               <p class="home-kicker">Desk</p>
               <p class="home-big home-desk-label">KALA is watch-only</p>
-              <p class="home-sub">Standing note. No prices on this card.</p>
+              <p class="home-quiet" id="homeFloorLine">Floor watch $6,000</p>
             </article>
             <article class="home-info" id="homeMapsCard">
               <p class="home-kicker">Directions</p>
@@ -680,6 +704,11 @@
               <div class="home-meta">
                 <button type="button" class="home-chip" id="homeMapsDir">Directions</button>
                 <button type="button" class="home-chip" data-go="maps">Open maps</button>
+              </div>
+              <div class="leave-by" id="homeLeaveBy">
+                <p>From <strong id="homeLeaveOrigin">347 S Pinecroft Dr, Taylors, SC 29687</strong></p>
+                <p>Leave by <strong id="homeLeaveClock"></strong></p>
+                <p id="homeDriveLine"></p>
               </div>
             </article>
           </div>
@@ -784,13 +813,14 @@
             <div class="chat-toolbar">
               <div class="personas" aria-label="Message filters"><button class="filter-chip active" data-filter="all">All</button><button class="filter-chip" data-filter="ace">Ace</button><button class="filter-chip" data-filter="cos">CoS</button><button class="filter-chip" data-filter="rail">Rail</button><button class="filter-chip" data-filter="anchor">Anchor</button><button type="button" class="archive-link" id="priorFeedBtn">Prior feed</button></div>
               <div class="mode-inline-group">
+                <button type="button" class="read-aloud" id="roomSpeak" aria-pressed="false" aria-label="Read new room messages aloud"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M4 10v4h3l4 4V6L7 10H4Z"/><path d="M16 9a4 4 0 0 1 0 6"/><path d="M18.5 6.5a7.5 7.5 0 0 1 0 11"/></svg><span>Read aloud</span></button>
                 <label class="mode-inline">One answer <button class="switch mode-switch" role="switch" aria-checked="true" aria-label="Toggle one-answer mode"></button></label>
                 <label class="mode-inline">Conversational <button type="button" class="switch" id="conversationalSwitch" role="switch" aria-checked="false" aria-label="Toggle conversational mode"></button></label>
               </div>
             </div>
             <div class="messages" id="log"></div>
             <div class="composer">
-              <div class="compose-box"><input id="input" aria-label="Message the desk" placeholder="What's on your mind, Shavor?…" autocomplete="off"/><div class="compose-tools"><div class="toolset"><label for="fileInput" id="attachBtn" class="mini-icon" aria-label="Attach a photo or video"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m21.4 11.6-8.9 8.9a6 6 0 0 1-8.5-8.5l9.2-9.2a4 4 0 0 1 5.7 5.7l-9.2 9.2a2 2 0 0 1-2.8-2.8l8.5-8.5"/></svg></label><input type="file" id="fileInput" accept="image/*,video/*" class="filehidden"><button type="button" id="micBtn" class="mini-icon" aria-label="Dictate">🎤</button><button type="button" id="speakBtn" class="filehidden" hidden aria-hidden="true" tabindex="-1" disabled aria-label="Speaker controlled by Conversational mode"></button><input type="checkbox" id="funnel" checked class="filehidden"><input type="checkbox" id="xtalk" class="filehidden"><span class="draft-note" id="desk">One answer is on</span></div><button class="send-demo" id="send" type="button" aria-label="Send"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/></svg></button></div></div>
+              <div class="compose-box"><input id="input" aria-label="Message the desk" placeholder="What's on your mind, Shavor?…" autocomplete="off"/><div class="compose-tools"><div class="toolset"><label for="fileInput" id="attachBtn" class="mini-icon" aria-label="Attach a photo or video"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m21.4 11.6-8.9 8.9a6 6 0 0 1-8.5-8.5l9.2-9.2a4 4 0 0 1 5.7 5.7l-9.2 9.2a2 2 0 0 1-2.8-2.8l8.5-8.5"/></svg></label><input type="file" id="fileInput" accept="image/*,video/*" class="filehidden"><button type="button" id="micBtn" class="mini-icon filehidden" hidden aria-hidden="true" tabindex="-1" disabled aria-label="Microphone is off">🎤</button><button type="button" id="speakBtn" class="filehidden" hidden aria-hidden="true" tabindex="-1" disabled aria-label="Speaker controlled by Conversational mode"></button><input type="checkbox" id="funnel" checked class="filehidden"><input type="checkbox" id="xtalk" class="filehidden"><span class="draft-note" id="desk">One answer is on</span></div><button class="send-demo" id="send" type="button" aria-label="Send"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/></svg></button></div></div>
             </div>
           </article>
           <aside class="card protocol-card">
@@ -874,9 +904,24 @@
               <button class="primary-btn maps-go" id="mapsGo" type="submit">Show map</button>
               <button class="ghost-btn maps-go" id="mapsExternal" type="button">Directions</button>
             </div>
+            <div class="leave-by" id="mapsLeaveBy">
+              <p>From <strong id="mapsLeaveOrigin">347 S Pinecroft Dr, Taylors, SC 29687</strong></p>
+              <label for="mapsArrive">Arrive by <input id="mapsArrive" type="time" aria-label="Arrive by"></label>
+              <p>Leave by <strong id="mapsLeaveClock"></strong></p>
+              <p id="mapsDriveLine"></p>
+            </div>
           </form>
           <p class="map-error" id="mapsMapError" hidden></p>
           <iframe class="map-frame" id="mapsFrame" title="Google map" hidden referrerpolicy="origin"></iframe>
+        </div>
+      </section>
+
+      <section class="view" id="familyView" aria-label="Elijah and Natalia">
+        <div class="card family-panel">
+          <p class="section-label">ELIJAH AND NATALIA</p>
+          <h2>Private folder</h2>
+          <p>When the trading account reaches $15,000, that milestone unlocks a separate credit project for Elijah and Natalia.</p>
+          <p>The legacy file lives with CoS. This folder does not hold account numbers.</p>
         </div>
       </section>
 
@@ -902,6 +947,7 @@
     <button class="nav-btn" data-view="youtube"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="6" width="18" height="12" rx="3"/><path d="m10 9 5 3-5 3V9Z"/></svg><span>YouTube</span></button>
     <button class="nav-btn" data-view="tasks"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m9 11 2 2 4-5"/><path d="M19 12a7 7 0 1 1-4.1-6.37"/></svg><span>Tasks</span></button>
     <button class="nav-btn" data-view="briefing"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 19.5V5a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v14.5"/><path d="M8 7h8M8 11h8M8 15h5M2 19h20"/></svg><span>Briefing</span></button>
+    <button class="nav-btn" data-view="family" aria-label="Elijah and Natalia"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 20V6a2 2 0 0 1 2-2h8l6 6v10a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2Z"/><path d="M14 4v6h6"/></svg><span>Family</span></button>
   </nav>
 
   <div class="drawer-backdrop" id="backdrop" aria-hidden="true"></div>
@@ -923,7 +969,8 @@
         maps: ["Address or from / to", "Directions"],
         youtube: ["Playlists after Google sign-in", "YouTube"],
         tasks: ["Build, verify, hand off", "Tasks"],
-        briefing: ["Tap into the lanes that matter", "Briefing"]
+        briefing: ["Tap into the lanes that matter", "Briefing"],
+        family: ["Private folder", "Elijah and Natalia"]
       };
       var views = document.querySelectorAll('.view');
       var navs = document.querySelectorAll('[data-view]');
@@ -1511,13 +1558,14 @@
       }
       function applyMark(phase){
         if (!phase) return;
-        var stamp = encodeURIComponent(String(phase.cycle) + '-' + String(phase.day_in_cycle));
+        var stamp = encodeURIComponent(String(phase.cycle) + '-' + String(phase.day_in_cycle) + (phase.season ? ('-' + phase.season) : ''));
         var src = '/icon.svg?v=' + stamp;
         document.querySelectorAll('.app-mark').forEach(function(img){ img.src = src; });
         var label = document.getElementById('homeMarkLabel');
         if (label) {
-          if (phase.variant === 'original') label.textContent = 'Original mark';
-          else label.textContent = phase.label + ' · original again in ' + phase.days_until_original + ' days';
+          var season = phase.season === 'october' ? 'October fall · ' : '';
+          if (phase.variant === 'original') label.textContent = season + 'Original mark';
+          else label.textContent = season + phase.label + ' · original again in ' + phase.days_until_original + ' days';
         }
         var theme = document.querySelector('meta[name="theme-color"]');
         if (theme && phase.variant !== 'original' && phase.color) theme.setAttribute('content', phase.color);
@@ -1563,7 +1611,51 @@
         frame.hidden = false;
         frame.src = '/api/maps/frame?' + params.toString();
       }
+      var driveSec = null;
+      var driveText = '';
+      function formatLeaveClock(sec){
+        var arriveEl = document.getElementById('mapsArrive');
+        var raw = arriveEl && arriveEl.value;
+        if (!raw || sec == null || !isFinite(sec)) return '';
+        var bits = raw.split(':');
+        if (bits.length < 2) return '';
+        var h = parseInt(bits[0], 10);
+        var m = parseInt(bits[1], 10);
+        if (!isFinite(h) || !isFinite(m)) return '';
+        var when = new Date();
+        when.setSeconds(0, 0);
+        when.setHours(h, m, 0, 0);
+        var leave = new Date(when.getTime() - (sec * 1000));
+        try {
+          return leave.toLocaleTimeString(undefined, {hour:'numeric', minute:'2-digit'});
+        } catch (e) { return ''; }
+      }
+      function paintLeaveBy(){
+        var origin = ((document.getElementById('mapsFrom') || {}).value || '').trim() || defaultMapsHome;
+        var homeOrigin = document.getElementById('homeLeaveOrigin');
+        var mapsOrigin = document.getElementById('mapsLeaveOrigin');
+        if (homeOrigin) homeOrigin.textContent = origin;
+        if (mapsOrigin) mapsOrigin.textContent = origin;
+        var fromLabel = document.getElementById('homeMapsFromLabel');
+        if (fromLabel) fromLabel.textContent = 'From ' + origin;
+        var clock = driveSec == null ? '' : formatLeaveClock(driveSec);
+        var homeClock = document.getElementById('homeLeaveClock');
+        var mapsClock = document.getElementById('mapsLeaveClock');
+        if (homeClock) homeClock.textContent = clock;
+        if (mapsClock) mapsClock.textContent = clock;
+        var drive = '';
+        if (driveSec != null) {
+          drive = driveText || (Math.max(1, Math.round(driveSec / 60)) + ' min');
+        }
+        var homeDrive = document.getElementById('homeDriveLine');
+        var mapsDrive = document.getElementById('mapsDriveLine');
+        if (homeDrive) homeDrive.textContent = drive ? ('Drive ' + drive) : '';
+        if (mapsDrive) mapsDrive.textContent = drive ? ('Drive ' + drive) : '';
+      }
       function showDeskMaps(origin, destination){
+        driveSec = null;
+        driveText = '';
+        paintLeaveBy();
         var label = document.getElementById('homeMapsFromLabel');
         if (label) label.textContent = 'From ' + (origin || defaultMapsHome);
         setMapError(document.getElementById('homeMapError'), '');
@@ -1581,9 +1673,27 @@
         if (homeFrame && ev.source === homeFrame.contentWindow) err = document.getElementById('homeMapError');
         else if (mapsFrame && ev.source === mapsFrame.contentWindow) err = document.getElementById('mapsMapError');
         if (!err) return;
-        if (data.ok) setMapError(err, '');
-        else setMapError(err, data.error || 'Could not show that map.');
+        if (data.ok) {
+          setMapError(err, '');
+          if (typeof data.durationSec === 'number' && isFinite(data.durationSec)) {
+            driveSec = data.durationSec;
+            driveText = data.durationText || '';
+          } else {
+            driveSec = null;
+            driveText = '';
+          }
+          paintLeaveBy();
+        } else {
+          driveSec = null;
+          driveText = '';
+          paintLeaveBy();
+          setMapError(err, data.error || 'Could not show that map.');
+        }
       });
+      var arriveInput = document.getElementById('mapsArrive');
+      if (arriveInput) arriveInput.addEventListener('input', paintLeaveBy);
+      var mapsFromInput = document.getElementById('mapsFrom');
+      if (mapsFromInput) mapsFromInput.addEventListener('input', paintLeaveBy);
       document.getElementById('mapsForm').addEventListener('submit', function(e){
         e.preventDefault();
         var places = mapsPlaces();
@@ -1640,14 +1750,33 @@
         }
         window.location.href = '/api/youtube/start?token=' + encodeURIComponent(tok);
       });
+      var YT_OPEN_KEY = 'desk_yt_open_id';
+      function ytOpenId(){
+        try { return localStorage.getItem(YT_OPEN_KEY) || ''; } catch (e) { return ''; }
+      }
       function renderYouTube(rows){
         var list = document.getElementById('youtubePlaylists');
         if (!list) return;
-        list.innerHTML = rows.map(function(item){
-          if (!item || !item.id || !item.title) return '';
+        var real = (rows || []).filter(function(item){ return item && item.id && item.title; });
+        var ids = real.map(function(item){ return item.id; });
+        var chosen = ytOpenId();
+        if (chosen && ids.indexOf(chosen) === -1) {
+          chosen = '';
+          try { localStorage.removeItem(YT_OPEN_KEY); } catch (e) {}
+        }
+        real.sort(function(a, b){
+          if (a.id === chosen) return -1;
+          if (b.id === chosen) return 1;
+          return 0;
+        });
+        list.innerHTML = real.map(function(item){
           var href = item.url || ('https://www.youtube.com/playlist?list=' + encodeURIComponent(item.id));
           var img = item.thumbnail ? '<img alt="" src="' + homeEsc(item.thumbnail) + '">' : '';
-          return '<a class="yt-card" href="' + homeEsc(href) + '" target="_blank" rel="noopener noreferrer">' + img + '<div><h3>' + homeEsc(item.title) + '</h3><small>' + homeEsc(item.id) + '</small></div></a>';
+          var marked = item.id === chosen;
+          var actions = '<div class="yt-actions"><button type="button" class="ghost-btn" data-yt-open="' + homeEsc(item.id) + '">' + (marked ? 'This one opens' : 'Open this one') + '</button>';
+          if (marked) actions += '<button type="button" class="primary-btn" data-yt-loop="' + homeEsc(item.id) + '">Play on a loop</button>';
+          actions += '</div>';
+          return '<div class="yt-card' + (marked ? ' marked' : '') + '">' + img + '<div><a href="' + homeEsc(href) + '" target="_blank" rel="noopener noreferrer"><h3>' + homeEsc(item.title) + '</h3></a><small>' + homeEsc(item.id) + '</small>' + actions + '</div></div>';
         }).join('');
       }
       function loadYouTube(){
@@ -1717,6 +1846,24 @@
       else if (ytFlag === 'denied') showToast('YouTube connect was cancelled');
       else if (ytFlag === 'error') showToast('YouTube connect did not finish');
       loadYouTube();
+      var ytList = document.getElementById('youtubePlaylists');
+      if (ytList) ytList.addEventListener('click', function(ev){
+        var openBtn = ev.target.closest('[data-yt-open]');
+        var loopBtn = ev.target.closest('[data-yt-loop]');
+        if (openBtn) {
+          var id = openBtn.getAttribute('data-yt-open') || '';
+          if (!id) return;
+          try { localStorage.setItem(YT_OPEN_KEY, id); } catch (e) {}
+          loadYouTube();
+          return;
+        }
+        if (loopBtn) {
+          var loopId = loopBtn.getAttribute('data-yt-loop') || '';
+          if (!loopId || loopId !== ytOpenId()) return;
+          var url = 'https://www.youtube.com/embed/videoseries?list=' + encodeURIComponent(loopId) + '&autoplay=1&loop=1';
+          window.open(url, '_blank', 'noopener');
+        }
+      });
       loadHome();
 
     })();
@@ -1821,10 +1968,15 @@ if ("speechSynthesis" in window) {
   initVoices();
   speechSynthesis.onvoiceschanged = initVoices;
 }
+let speakPinned = false;
+function paintRoomSpeak(){
+  const btn = document.getElementById("roomSpeak");
+  if (!btn) return;
+  btn.setAttribute("aria-pressed", speakOn ? "true" : "false");
+}
 function speak(who, text){
-  // TTS only while Conversational is on (no separate speaker button).
-  const conv = !!conversationalOn || !!window.__deskConversational;
-  if (!conv || !speakOn || !("speechSynthesis" in window)) return;
+  // Browser speechSynthesis. No server voice. New replies only — history is not read.
+  if (!speakOn || !("speechSynthesis" in window) || !text) return;
   try {
     speechSynthesis.cancel(); // one voice at a time — newest message wins
     const u = new SpeechSynthesisUtterance(text);
@@ -1869,17 +2021,28 @@ function setSpeakEnabled(on){
     speakBtn.textContent = speakOn ? "🔊" : "🔇";
     speakBtn.classList.toggle("on", speakOn);
   }
+  paintRoomSpeak();
   if (!speakOn && "speechSynthesis" in window) {
     try { speechSynthesis.cancel(); } catch(e) {}
   }
+}
+const roomSpeakBtn = document.getElementById("roomSpeak");
+if (roomSpeakBtn) {
+  roomSpeakBtn.addEventListener("click", () => {
+    speakPinned = !speakPinned;
+    setSpeakEnabled(speakPinned || !!conversationalOn);
+    if (typeof showToast === "function") {
+      showToast(speakPinned ? "Read aloud is on for new room messages" : "Read aloud is off");
+    }
+  });
 }
 
 window.deskSetConversational = window.deskSetConversational || function(on){
   conversationalOn = !!on;
   const sw = document.getElementById("conversationalSwitch");
   if (sw) sw.setAttribute("aria-checked", on ? "true" : "false");
-  // TTS follows Conversational only — no separate speaker toggle.
-  setSpeakEnabled(!!on);
+  // Conversational may turn read-aloud on. Turning it off leaves a pinned speaker on.
+  setSpeakEnabled(!!on || !!speakPinned);
 };
 
 window.deskConversationalUtterance = window.deskConversationalUtterance || function(text){
@@ -1892,7 +2055,7 @@ window.deskConversationalUtterance = window.deskConversationalUtterance || funct
 
 function stopBrowserConversational(){
   conversationalOn = false;
-  setSpeakEnabled(false);
+  setSpeakEnabled(!!speakPinned);
   if (convRec) {
     try { convRec.onend = convRec.onerror = convRec.onresult = null; convRec.stop(); } catch(e) {}
     convRec = null;

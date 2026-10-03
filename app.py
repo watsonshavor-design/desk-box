@@ -1159,11 +1159,15 @@ def icon_phase(on=None):
         twist = ("ring", "spark", "plain")[slot % 3]
     color = _MARK_COLORS[variant]
     until = 0 if day_in == 0 else _MARK_CYCLE_DAYS - day_in
+    # October overlay sits on the same 4-day color. It does not replace the palette
+    # or the return to the original purple at the start of each 30-day cycle.
+    season = "october" if on.month == 10 else ""
     return {
         "variant": variant,
         "label": "Original" if variant == "original" else variant.title(),
         "color": color,
         "twist": twist,
+        "season": season,
         "cycle": cycle,
         "day_in_cycle": day_in,
         "window_days": _MARK_WINDOW_DAYS,
@@ -1178,6 +1182,15 @@ def _hex_rgb(value):
     return tuple(int(h[i:i + 2], 16) for i in (0, 2, 4))
 
 
+def _october_leaf_svg():
+    """Small fall accent. Does not replace the diamond or its 4-day fill."""
+    return (
+        '<path fill="#ea580c" d="M48.6 9.4c1.7 2.1.7 4.2-.7 5.2 1.6.2 2.7 1.6 2.1 3.2'
+        '-1.5.7-3-.3-3.8-1.4-.9 1.4-2.3 1.7-3.3.4.7-1.6.2-3.1 1.3-3.9'
+        '-1.5-.8-1.6-2.9-.1-3.7 1.5.1 2.5.9 3.7.9.3-.7.6-1.1.8-.7z"/>'
+    )
+
+
 def mark_svg(phase=None):
     phase = phase or icon_phase()
     color = phase["color"]
@@ -1188,13 +1201,14 @@ def mark_svg(phase=None):
         ring = f'<circle cx="32" cy="32" r="26.5" fill="none" stroke="{color}" stroke-width="2.4"/>'
     elif twist == "spark":
         spark = f'<circle cx="50" cy="13" r="3.6" fill="{color}"/>'
+    leaf = _october_leaf_svg() if phase.get("season") == "october" else ""
     return (
         '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Desk">'
         '<rect width="64" height="64" rx="14" fill="#0d1117"/>'
         f"{ring}"
         f'<circle cx="32" cy="32" r="22" fill="{color}"/>'
         '<path d="M32 18 46 32 32 46 18 32Z" fill="#0d1117"/>'
-        f"{spark}"
+        f"{spark}{leaf}"
         "</svg>"
     )
 
@@ -1243,6 +1257,11 @@ def mark_png(size, phase=None):
                 px = bg
             if twist == "spark" and (x - sx) ** 2 + (y - sy) ** 2 <= spark_r ** 2:
                 px = fill
+            if phase.get("season") == "october":
+                lx = cx + radius * 0.72
+                ly = cy - radius * 1.18
+                if abs(x - lx) * 0.9 + abs(y - ly) * 1.35 <= size * 0.055:
+                    px = (234, 88, 12)
             row += bytes((px[0], px[1], px[2], 255))
         rows.append(bytes(row))
     raw = b"".join(b"\x00" + row for row in rows)
@@ -1603,7 +1622,7 @@ async def icon_mark_png(size: int = 192):
         size = 180
     else:
         size = 192
-    key = (size, phase["variant"], phase["twist"], phase["cycle"])
+    key = (size, phase["variant"], phase["twist"], phase["cycle"], phase.get("season") or "")
     png = _mark_png_cache.get(key)
     if png is None:
         png = mark_png(size, phase)
@@ -1758,9 +1777,15 @@ _MAP_FRAME = """<!doctype html>
   var errEl = document.getElementById('err');
   var noteEl = document.getElementById('note');
   var mapEl = document.getElementById('map');
-  function tell(ok, error){
+  function tell(ok, error, extra){
+    var msg = {source: 'desk-map', ok: !!ok, error: error || ''};
+    extra = extra || {};
+    if (typeof extra.durationSec === 'number' && isFinite(extra.durationSec) && extra.durationSec >= 0) {
+      msg.durationSec = extra.durationSec;
+    }
+    if (extra.durationText) msg.durationText = String(extra.durationText).slice(0, 48);
     try {
-      parent.postMessage({source: 'desk-map', ok: !!ok, error: error || ''}, location.origin);
+      parent.postMessage(msg, location.origin);
     } catch (e) {}
   }
   function fail(msg){
@@ -1840,7 +1865,13 @@ _MAP_FRAME = """<!doctype html>
       }, function(result, status){
         if (status === 'OK' && result) {
           renderer.setDirections(result);
-          tell(true, '');
+          var leg = result.routes && result.routes[0] && result.routes[0].legs && result.routes[0].legs[0];
+          var extra = {};
+          if (leg && leg.duration && typeof leg.duration.value === 'number' && isFinite(leg.duration.value)) {
+            extra.durationSec = leg.duration.value;
+            extra.durationText = leg.duration.text || '';
+          }
+          tell(true, '', extra);
           return;
         }
         new google.maps.Marker({map: map, position: places.origin.ll, title: places.origin.formatted || cfg.origin});
