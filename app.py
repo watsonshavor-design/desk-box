@@ -3037,10 +3037,42 @@ async def ace_reply(request: Request):
     return JSONResponse({"ok": True})
 
 
+# Seats named on a CoS post. They have no login and no post path.
+_CONTRIBUTOR_LABELS = {
+    "scout": "Scout",
+    "muse": "Muse Ops",
+    "finance": "Finance Tracker",
+}
+_CONTRIBUTOR_ALIASES = {
+    "researcher": "scout",
+    "muse-ops": "muse",
+    "museops": "muse",
+    "finance-tracker": "finance",
+    "financetracker": "finance",
+}
+
+
+def parse_contributors(raw):
+    """Keep only the three crew seats. Unknown names are dropped."""
+    if isinstance(raw, str):
+        raw = [part for part in raw.replace(";", ",").split(",")]
+    if not isinstance(raw, list):
+        return []
+    out = []
+    for item in raw[:8]:
+        key = str(item or "").strip().lower().replace(" ", "-").replace("_", "-")
+        key = _CONTRIBUTOR_ALIASES.get(key, key)
+        if key in _CONTRIBUTOR_LABELS and key not in out:
+            out.append(key)
+    return out
+
+
 # Chief of Staff (CoS) posts into the room the same way Ace does.
-# POST /api/cos-reply {"token": ..., "text": ..., "discuss"?: bool}
-#   from=cos, broadcast provider=cos. discuss=true queues one Rail/Anchor
-#   fan-out round framed as from CoS (never re-enters the queue).
+# POST /api/cos-reply {"token": ..., "text": ..., "discuss"?: bool,
+#                      "seats"?: ["scout","muse","finance"]}
+#   from=cos, broadcast provider=cos. Optional seats names who contributed.
+#   Those seats cannot post. discuss=true queues one Rail/Anchor fan-out
+#   round framed as from CoS (never re-enters the queue).
 @app.post("/api/cos-reply")
 async def cos_reply(request: Request):
     try:
@@ -3053,12 +3085,17 @@ async def cos_reply(request: Request):
     if not text:
         return JSONResponse({"error": "empty"}, status_code=400)
     entry = {"from": "cos", "text": text, "ts": now_iso()}
+    seats = parse_contributors(body.get("seats"))
+    if seats:
+        entry["seats"] = seats
     attachment, image, kind = resolve_attachment(body.get("attachment"))
     if attachment:
         entry["attachment"] = attachment
     await remember(entry)
     bcast = {"type": "reply", "provider": "cos",
              "round": 1, "text": text, "ts": entry["ts"]}
+    if seats:
+        bcast["seats"] = seats
     if attachment:
         bcast["attachment"] = attachment
     await room.broadcast(bcast)

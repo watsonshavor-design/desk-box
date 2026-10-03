@@ -2496,6 +2496,17 @@ const NAMES = {
   cos:    ["CHIEF OF STAFF", "/static/icon-192.png"],
   me:     ["SHAVOR", null]
 };
+const SEAT_LABELS = {scout:"Scout", muse:"Muse Ops", finance:"Finance Tracker"};
+function seatChip(seats){
+  if (!Array.isArray(seats) || !seats.length) return "";
+  const names = [];
+  seats.forEach(function(s){
+    const label = SEAT_LABELS[String(s || "").toLowerCase()];
+    if (label && names.indexOf(label) < 0) names.push(label);
+  });
+  if (!names.length) return "";
+  return `<span class="round">with ${esc(names.join(", "))}</span>`;
+}
 
 function attHtml(a){
   if(!a || !a.url) return "";
@@ -2505,7 +2516,7 @@ function attHtml(a){
   return `<a href="${src}" target="_blank" rel="noopener"><img src="${src}" alt="photo" style="max-width:100%;border-radius:8px;margin-top:6px"></a>`;
 }
 
-function addMsg(who, text, round, ts, att){
+function addMsg(who, text, round, ts, att, seats){
   const div = document.createElement("div");
   div.className = "msg " + who;
   const speaker = who === "grok" ? "rail" : who === "gemini" ? "anchor" : who;
@@ -2514,6 +2525,7 @@ function addMsg(who, text, round, ts, att){
   const av = nm[1] ? `<img class="av" src="${nm[1]}" alt="">` : "";
   div.innerHTML = `<div class="who ${who}">${av}<span class="who-name">${nm[0]}</span>` +
     (round && round>1 ? `<span class="round">round ${round} · reacts</span>` : "") +
+    seatChip(seats) +
     `<span class="ts">${esc(fmtTs(ts))}</span>` +
     `</div><div>${esc(text)}${attHtml(att)}</div>`;
   log.appendChild(div); log.scrollTop = log.scrollHeight;
@@ -2754,7 +2766,7 @@ function paintHistory(messages){
   (messages||[]).forEach(x=>{
     if(x.hidden) return;
     if(x.from==="shavor") addMsg("me", x.text, null, x.ts, x.attachment);
-    else addMsg(x.from, x.text, x.round, x.ts, x.attachment);
+    else addMsg(x.from, x.text, x.round, x.ts, x.attachment, x.seats);
   });
 }
 function connect(){
@@ -2774,7 +2786,7 @@ function connect(){
     else if(m.type==="user"){ addMsg("me", m.text, null, m.ts, m.attachment); }
     else if(m.type==="status"){ setThinking(m.provider, m.state);
         if(m.state==="error") addMsg(m.provider, "⚠ " + (m.detail||"request failed"), null, null); }
-    else if(m.type==="reply"){ setThinking(m.provider, "done"); addMsg(m.provider, m.text, m.round, m.ts, m.attachment); speak(m.provider, m.text); }
+    else if(m.type==="reply"){ setThinking(m.provider, "done"); addMsg(m.provider, m.text, m.round, m.ts, m.attachment, m.seats); speak(m.provider, m.text); }
     else if(m.type==="done"){ /* round closed */ }
   };
 }
@@ -2902,8 +2914,8 @@ function showAnswer(title, body, ts){
 }
 setInterval(function(){ if (_answerUpdatedAt) toneAnswerLabel(_answerUpdatedAt); }, 60000);
 var _addMsg = addMsg;
-addMsg = function(who, text, round, ts, att){
-  var div = _addMsg(who, text, round, ts, att);
+addMsg = function(who, text, round, ts, att, seats){
+  var div = _addMsg(who, text, round, ts, att, seats);
   if(who==="ace" && text){
     var line = text.split("\n")[0];
     var when = ts || new Date().toISOString();
@@ -2965,7 +2977,7 @@ if(priorBtn) priorBtn.onclick = async () => {
     (d2.messages||[]).forEach(x=>{
       if(x.hidden) return;
       if(x.from==="shavor") addMsg("me", x.text, null, x.ts, x.attachment);
-      else addMsg(x.from, x.text, x.round, x.ts, x.attachment);
+      else addMsg(x.from, x.text, x.round, x.ts, x.attachment, x.seats);
     });
   } catch(e) {
     viewingArchive = false;
