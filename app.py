@@ -9,12 +9,12 @@ Security notes:
   - API keys live ONLY in server env vars (XAI_API_KEY, GEMINI_API_KEY).
     They are never sent to the browser.
   - A per-boot token guards the WebSocket. Set DESK_TOKEN yourself, or the
-    server generates one and prints the URL.
+    server generates one for the current boot.
   - One cross-talk round max per message; no bot-to-bot chaining.
   - Night Desk bots have no API, so they join via paste — the room keeps a
     session log (desk-log.jsonl) Shavor can paste back to them.
 
-Run:  uvicorn app:app --host 0.0.0.0 --port 8000
+Run:  uvicorn app:app --host 0.0.0.0 --port 8000 --no-access-log
 """
 import asyncio
 import base64
@@ -35,7 +35,7 @@ from datetime import datetime, timedelta, timezone
 
 from fastapi import FastAPI, File, Request, UploadFile, WebSocket, WebSocketDisconnect
 from html import escape
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from providers import PROVIDERS
@@ -816,9 +816,7 @@ async def on_startup():
             # Strip the header line the saver writes.
             body = digest.split("\n\n", 1)
             save_room_memory(body[1] if len(body) > 1 else digest)
-    if "DESK_TOKEN" not in os.environ:
-        log.info("DESK_TOKEN not set — generated per-boot token.")
-    log.info("Desk Box up. Open /?token=%s", DESK_TOKEN)
+    log.info("Desk Box up.")
 
 
 
@@ -827,8 +825,29 @@ async def health():
     """Liveness only — no token, no secrets."""
     return JSONResponse({"ok": True, "service": "desk-box", "archive": True})
 
+_YOUTUBE_RETURN_MESSAGES = {
+    "connected": "Google sign-in finished. Reopen the Desk app the usual way.",
+    "denied": "Google sign-in was denied or cancelled. Reopen the Desk app the usual way.",
+    "error": "Google sign-in did not finish. Reopen the Desk app the usual way.",
+}
+
+
+def _youtube_return_page(yt: str = "", code: str = "", error: str = ""):
+    """Give OAuth returns a safe browser response without exposing auth inputs."""
+    if yt in _YOUTUBE_RETURN_MESSAGES:
+        message = _YOUTUBE_RETURN_MESSAGES[yt]
+    elif code or error:
+        message = "Google sign-in finished. Reopen the Desk app the usual way."
+    else:
+        return None
+    return PlainTextResponse(message, headers={"Cache-Control": "no-store"})
+
+
 @app.get("/")
-async def index(token: str = ""):
+async def index(token: str = "", yt: str = "", code: str = "", error: str = ""):
+    oauth_return = _youtube_return_page(yt=yt, code=code, error=error)
+    if oauth_return is not None:
+        return oauth_return
     if token != DESK_TOKEN:
         return JSONResponse({"error": "bad token"}, status_code=403)
     return FileResponse(
@@ -2426,15 +2445,20 @@ async def youtube_start(request: Request, token: str = ""):
     return RedirectResponse(_youtube_authorize_url(state), status_code=302)
 
 
+def _youtube_callback_redirect(status: str):
+    """Return a token-free front-door URL; the front door renders the safe message."""
+    return RedirectResponse(f"/?yt={status}#youtube", status_code=302)
+
+
 @app.get("/api/youtube/callback")
 async def youtube_callback(code: str = "", state: str = "", error: str = ""):
     """Exchange the Google code and store the refresh token under DESK_DATA_DIR."""
     if error or not code or not state or not _consume_oauth_state(state):
         log.info("youtube oauth callback rejected")
-        return RedirectResponse("/?yt=denied#youtube", status_code=302)
+        return _youtube_callback_redirect("denied")
     client_id, client_secret = _google_oauth_creds()
     if not client_id or not client_secret:
-        return RedirectResponse("/?yt=error#youtube", status_code=302)
+        return _youtube_callback_redirect("error")
     try:
         async with httpx.AsyncClient() as client:
             resp = await client.post(
@@ -2450,16 +2474,16 @@ async def youtube_callback(code: str = "", state: str = "", error: str = ""):
             )
     except Exception:
         log.info("youtube oauth exchange failed")
-        return RedirectResponse("/?yt=error#youtube", status_code=302)
+        return _youtube_callback_redirect("error")
     if resp.status_code != 200:
         log.info("youtube oauth exchange status=%s", resp.status_code)
-        return RedirectResponse("/?yt=error#youtube", status_code=302)
+        return _youtube_callback_redirect("error")
     try:
         body = resp.json()
     except Exception:
-        return RedirectResponse("/?yt=error#youtube", status_code=302)
+        return _youtube_callback_redirect("error")
     if not isinstance(body, dict):
-        return RedirectResponse("/?yt=error#youtube", status_code=302)
+        return _youtube_callback_redirect("error")
     scope = body.get("scope") or ""
     if isinstance(scope, str) and scope.strip():
         allowed = {
@@ -2469,17 +2493,17 @@ async def youtube_callback(code: str = "", state: str = "", error: str = ""):
         parts = scope.split()
         if not parts or any(part not in allowed for part in parts):
             log.info("youtube oauth scope rejected")
-            return RedirectResponse("/?yt=error#youtube", status_code=302)
+            return _youtube_callback_redirect("error")
     try:
         stored = _store_youtube_tokens(body, _secret_read(YOUTUBE_TOKEN_PATH))
     except OSError:
         log.info("youtube refresh token could not be stored")
-        return RedirectResponse("/?yt=error#youtube", status_code=302)
+        return _youtube_callback_redirect("error")
     if not stored:
         log.info("youtube oauth returned no refresh token")
-        return RedirectResponse("/?yt=error#youtube", status_code=302)
+        return _youtube_callback_redirect("error")
     log.info("youtube oauth connected")
-    return RedirectResponse("/?yt=connected#youtube", status_code=302)
+    return _youtube_callback_redirect("connected")
 
 
 DEFAULT_MAPS_ORIGIN = "347 S Pinecroft Dr, Taylors, SC 29687"

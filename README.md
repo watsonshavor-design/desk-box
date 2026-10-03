@@ -24,14 +24,15 @@ browser ──WebSocket──▶ FastAPI backend ──┬──▶ xAI Response
 cd desk-box
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-cp .env.example .env   # then fill in XAI_API_KEY and GEMINI_API_KEY
-uvicorn app:app --host 0.0.0.0 --port 8000
+cp .env.example .env   # then fill in the keys and DESK_TOKEN
+uvicorn app:app --host 0.0.0.0 --port 8000 --no-access-log
 ```
 
-Open the URL it prints (it includes your `?token=...`). If `DESK_TOKEN` is
-unset, the server generates one per boot and prints it — no extra setup.
+Set `DESK_TOKEN` in `.env`, then open `http://localhost:8000/?token=...` with
+that value. The server never prints the room token; keeping it in the environment
+also makes the URL stable across restarts.
 
-Dev mode (no API spend): `MOCK_PROVIDERS=1 uvicorn app:app --port 8000`
+Dev mode (no API spend): `MOCK_PROVIDERS=1 uvicorn app:app --port 8000 --no-access-log`
 returns canned replies so you can test the whole loop.
 
 ## Deploy
