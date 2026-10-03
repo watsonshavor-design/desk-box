@@ -427,6 +427,27 @@
     .home-compact .home-desk-label { margin-top: 8px; font-size: 17px; }
     .home-kicker { margin: 0; font-size: 14px; font-weight: 700; letter-spacing: -.01em; }
     .home-big { margin: 6px 0 0; font-size: 32px; font-weight: 700; letter-spacing: -.04em; line-height: 1; }
+    .home-weather-main { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+    .weather-visual {
+      width: 42px; height: 42px; flex: 0 0 auto; display: grid; place-items: center;
+      border-radius: 14px; background: var(--weather-icon-bg, var(--surface-2));
+      color: var(--weather-icon-color, var(--muted));
+      box-shadow: inset 0 0 0 1px rgba(255,255,255,.28);
+    }
+    .weather-visual-icon { font-size: 25px; line-height: 1; font-family: "Apple Color Emoji", "Segoe UI Emoji", sans-serif; }
+    #homeWeather { background: linear-gradient(145deg, var(--surface), var(--weather-wash, var(--surface))); }
+    #homeWeather.weather-cold { --weather-wash: #e7f2ff; --weather-icon-bg: #d4e8ff; --weather-icon-color: #3478b9; }
+    #homeWeather.weather-cool { --weather-wash: #e9f5f4; --weather-icon-bg: #d4eeeb; --weather-icon-color: #287c79; }
+    #homeWeather.weather-mild { --weather-wash: #fff6dc; --weather-icon-bg: #ffeab0; --weather-icon-color: #b56a1d; }
+    #homeWeather.weather-warm { --weather-wash: #fff0dc; --weather-icon-bg: #ffd9a8; --weather-icon-color: #c35c25; }
+    #homeWeather.weather-hot { --weather-wash: #ffe5e0; --weather-icon-bg: #ffc6bc; --weather-icon-color: #bd3f36; }
+    @media (prefers-color-scheme: dark) {
+      #homeWeather.weather-cold { --weather-wash: #182b42; --weather-icon-bg: #213d5c; --weather-icon-color: #9bc9ff; }
+      #homeWeather.weather-cool { --weather-wash: #183735; --weather-icon-bg: #20514e; --weather-icon-color: #92dfd9; }
+      #homeWeather.weather-mild { --weather-wash: #49371d; --weather-icon-bg: #63491f; --weather-icon-color: #ffd37b; }
+      #homeWeather.weather-warm { --weather-wash: #4d2e1b; --weather-icon-bg: #69391e; --weather-icon-color: #ffb16e; }
+      #homeWeather.weather-hot { --weather-wash: #4b2425; --weather-icon-bg: #682d2d; --weather-icon-color: #ffaaa3; }
+    }
     .home-desk-label { font-size: 18px; letter-spacing: -.02em; line-height: 1.25; margin-top: 10px; }
     .home-sub { margin: 6px 0 0; color: var(--muted); font-size: 12px; font-weight: 600; }
     .home-meta { margin-top: auto; display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: center; color: var(--muted); font-size: 12px; font-weight: 650; padding-top: 8px; }
@@ -703,7 +724,10 @@
           <div class="home-cards" id="homeCards">
             <article class="home-info home-compact" id="homeWeather">
               <p class="home-kicker">Taylors</p>
-              <p class="home-big" id="homeTemp">…</p>
+              <div class="home-weather-main">
+                <p class="home-big" id="homeTemp">…</p>
+                <div class="weather-visual" id="homeWeatherVisual" aria-hidden="true"><span class="weather-visual-icon" id="homeWeatherVisualIcon">…</span></div>
+              </div>
               <p class="home-sub" id="homeCond">Checking weather</p>
               <div class="home-meta" id="homeWeatherMeta"><span id="homePrecip"></span><span id="homeAqi"></span></div>
             </article>
@@ -1522,19 +1546,52 @@
             + '<div class="home-src">' + homeEsc(item.source || 'News') + '</div></div></a>';
         }).join('');
       }
+      function weatherTemperatureBand(n){
+        if (n < 40) return 'cold';
+        if (n < 60) return 'cool';
+        if (n < 80) return 'mild';
+        if (n < 95) return 'warm';
+        return 'hot';
+      }
+      function weatherVisualFor(condition){
+        var text = String(condition || '').toLowerCase();
+        if (text.indexOf('thunder') !== -1) return '⚡';
+        if (text.indexOf('snow') !== -1 || text.indexOf('freez') !== -1) return '❄';
+        if (text.indexOf('rain') !== -1 || text.indexOf('drizzle') !== -1) return '☂';
+        if (text.indexOf('fog') !== -1 || text.indexOf('mist') !== -1) return '≋';
+        if (text.indexOf('partly') !== -1) return '⛅';
+        if (text.indexOf('cloud') !== -1 || text.indexOf('overcast') !== -1) return '☁';
+        return '☀';
+      }
+      function resetWeatherVisual(){
+        var card = document.getElementById('homeWeather');
+        var icon = document.getElementById('homeWeatherVisualIcon');
+        ['cold', 'cool', 'mild', 'warm', 'hot'].forEach(function(band){
+          card.classList.remove('weather-' + band);
+        });
+        icon.textContent = '…';
+      }
       function paintWeather(data){
         var w = (data && data.weather) || {};
         var temp = document.getElementById('homeTemp');
         var cond = document.getElementById('homeCond');
         var precip = document.getElementById('homePrecip');
         var aqi = document.getElementById('homeAqi');
-        if (!w.ok || w.temperature_f == null) {
+        var icon = document.getElementById('homeWeatherVisualIcon');
+        var n = Number(w.temperature_f);
+        if (!w.ok || !Number.isFinite(n)) {
           temp.textContent = '—';
           cond.textContent = 'Weather unavailable';
           precip.textContent = '';
           aqi.textContent = '';
+          resetWeatherVisual();
         } else {
-          var n = Number(w.temperature_f);
+          var band = weatherTemperatureBand(n);
+          var card = document.getElementById('homeWeather');
+          ['cold', 'cool', 'mild', 'warm', 'hot'].forEach(function(name){
+            card.classList.toggle('weather-' + name, name === band);
+          });
+          icon.textContent = weatherVisualFor(w.condition);
           temp.textContent = (Math.round(n * 10) / 10) + '°';
           cond.textContent = w.condition || 'Now';
           precip.textContent = (w.precip_chance_pct == null) ? '' : (w.precip_chance_pct + '% precip');
